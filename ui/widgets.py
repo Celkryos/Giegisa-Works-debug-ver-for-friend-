@@ -1,5 +1,3 @@
-"""???? Qt ???"""
-
 import os
 import re
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QVBoxLayout, QHBoxLayout, QDialog, QListWidget, QPushButton, QTextEdit, QSizePolicy)

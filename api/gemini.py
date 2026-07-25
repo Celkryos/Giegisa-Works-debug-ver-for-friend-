@@ -1,16 +1,36 @@
-"""Gemini REST ??????????? Gemini ???"""
+"""Gemini API 调用 —— 通过 Google Gen AI SDK。"""
 
-import json
-import urllib.request
+import httpx
+from google import genai
+
 
 def gemini_rest_generate(config, prompt, system_instruction=None, history=None,
                          image_b64=None, image_mime="image/png", timeout=30):
+    """调用 Gemini 模型生成回复。
+
+    Args:
+        config: 配置字典，需包含 gemini_api_key、gemini_model_name
+        prompt: 当前用户提示词
+        system_instruction: 系统指令（可选）
+        history: 历史对话列表 [{"role": "user"/"assistant", "content": "..."}]
+        image_b64: base64 编码的图片数据（可选）
+        image_mime: 图片 MIME 类型，默认 "image/png"
+        timeout: 请求超时秒数，默认 30
+
+    Returns:
+        模型生成的回复文本
+
+    Raises:
+        ValueError: API Key 未填写或返回空内容
+    """
     api_key = config.get("gemini_api_key", "").strip()
     if not api_key:
         raise ValueError("尚未填写 Gemini API Key。")
-    model_name = (config.get("gemini_model_name") or "gemini-3.5-flash").strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
+    model_name = (config.get("gemini_model_name") or "gemini-3.5-flash").strip()
+    proxy = (config.get("gemini_proxy") or "").strip()
+
+    # ---- 构建对话内容 ----
     contents = []
     if history:
         for m in history:
@@ -21,42 +41,48 @@ def gemini_rest_generate(config, prompt, system_instruction=None, history=None,
     if prompt:
         user_parts.append({"text": prompt})
     if image_b64:
-        user_parts.append({"inline_data": {"mime_type": image_mime, "data": image_b64}})
-    if not user_parts:  # 兜底，避免发空请求
+        user_parts.append({
+            "inline_data": {"mime_type": image_mime, "data": image_b64},
+        })
+    if not user_parts:
         user_parts.append({"text": " "})
     contents.append({"role": "user", "parts": user_parts})
 
-    body = {"contents": contents}
-    if system_instruction:
-        body["system_instruction"] = {"parts": [{"text": system_instruction}]}
-
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    # “Gemini 代理”只应该影响 Gemini 请求。旧代码把它写进全局
-    # HTTP_PROXY/HTTPS_PROXY，导致硅基流动等 OpenAI 兼容接口也被迫走
-    # 127.0.0.1 本地代理；代理软件没启动时就会报 WinError 10061。
-    proxy = (config.get("gemini_proxy") or "").strip()
+    # ---- 创建客户端（代理只影响 Gemini，不污染全局环境变量）----
+    http_options = {"timeout": timeout * 1000}
     if proxy:
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-        response_context = opener.open(req, timeout=timeout)
-    else:
-        response_context = urllib.request.urlopen(req, timeout=timeout)
+        http_options["transport"] = httpx.HTTPTransport(proxy=proxy)
 
-    with response_context as response:
-        result = json.loads(response.read().decode("utf-8"))
+    client = genai.Client(api_key=api_key, http_options=http_options)
 
-    candidates = result.get("candidates") or []
+    # ---- 构建生成配置 ----
+    generate_config = {}
+    if system_instruction:
+        generate_config["system_instruction"] = {
+            "parts": [{"text": system_instruction}],
+        }
+
+    # ---- 发起请求 ----
+    response = client.models.generate_content(
+        model=model_name,
+        contents=contents,
+        config=generate_config,
+    )
+
+    # ---- 解析响应 ----
+    candidates = response.candidates
     if not candidates:
-        # 常见于内容被安全策略拦截，或 key/模型名错误
-        feedback = result.get("promptFeedback") or result.get("error") or "Gemini 未返回任何内容"
+        feedback = getattr(response, "prompt_feedback", None) or "Gemini 未返回任何内容"
         raise ValueError(str(feedback))
-    parts = candidates[0].get("content", {}).get("parts", [])
-    text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+
+    text = "".join(
+        part.text
+        for candidate in candidates
+        if candidate.content
+        for part in candidate.content.parts
+        if part.text
+    )
     if not text.strip():
         raise ValueError("Gemini 返回了空内容。")
+
     return text.strip()

@@ -1,13 +1,12 @@
-"""????????????????????"""
-
 import os
 import json
 import random
+import re
 import time
 import base64
 import urllib.request
 from PyQt6.QtCore import QThread, pyqtSignal
-from config import save_config
+from config import BASE_DIR, save_config
 from api import gemini_rest_generate, openai_chat
 
 class TriviaThread(QThread):

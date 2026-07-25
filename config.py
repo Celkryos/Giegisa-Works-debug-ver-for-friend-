@@ -1,5 +1,3 @@
-"""??????????????????"""
-
 import sys
 import os
 import json
@@ -30,7 +28,7 @@ _SAVE_STATE = {"dirty": False, "last": 0.0}
 DEFAULT_CONFIG = {
     "api_type": "openai",  
     "gemini_api_key": "",  
-    "gemini_model_name": "gemini-3.5-flash",  # 修正：原默认值 gemini-3.5-flash 是不存在的模型，新用户开箱即报404
+    "gemini_model_name": "gemini-3.5-flash",
     "gemini_proxy": "",  
     "openai_api_key": "", 
     "openai_base_url": "https://api.siliconflow.cn/v1",
