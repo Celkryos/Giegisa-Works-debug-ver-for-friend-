@@ -60,8 +60,8 @@ class IdleChatThread(QThread):
                                      {"role": "user", "content": prompt}],
                                     temperature=0.8, timeout=45)
             self.result_ready.emit(reply.strip())
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[闲聊线程失败] {e}")
 
 class RandomEventThread(QThread):
     result_ready = pyqtSignal(dict)
@@ -71,6 +71,7 @@ class RandomEventThread(QThread):
         self.config = config
 
     def run(self):
+        reply = None
         try:
             prompt = (
                 f"【系统随机种子：{random.randint(1, 999999)}】请生成一个给用户的随机遭遇小剧场事件（日常或异世界均可，规避大模型偷懒现象）。\n"
@@ -86,14 +87,18 @@ class RandomEventThread(QThread):
                 reply = openai_chat(self.config,
                                     [{"role": "user", "content": prompt}],
                                     temperature=0.9, timeout=45)
-            
+
             match = re.search(r'\{.*\}', reply, re.DOTALL)
             if match:
                 reply = match.group(0)
             data = json.loads(reply)
             self.result_ready.emit(data)
+        except json.JSONDecodeError as e:
+            print(f"[小剧场] JSON 解析失败: {e}")
+            print(f"[小剧场] 提取到的片段: {(reply or '')[:200]}")
         except Exception as e:
-            print("小剧场生成失败:", str(e))
+            print(f"[小剧场] API 调用失败: {e}")
+            print(f"[小剧场] 请检查 API Key 与模型名称是否已配置")
 
 class DataRetrievalThread(QThread):
     result_ready = pyqtSignal(str)
@@ -175,7 +180,7 @@ class ImageFetchThread(QThread):
     def run(self):
         try:
             req = urllib.request.Request(self.url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, timeout=30) as response:
                 data = response.read()
                 self.finished.emit(data)
         except Exception as e:

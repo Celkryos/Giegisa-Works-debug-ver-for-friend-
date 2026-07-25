@@ -53,10 +53,10 @@ class DesktopPet(QWidget):
     def __init__(self):
         super().__init__()
         self.config = load_config()
-        
+
         self.scale_size = 200
         self.current_emotion = "normal"
-        
+
         self.total_mood = self.config.get("total_mood", 50.0)
         if "mood_value" in self.config:
             self.session_mood = float(self.config["mood_value"])
@@ -65,8 +65,8 @@ class DesktopPet(QWidget):
             self.config["total_mood"] = self.total_mood
             save_config(self.config)
         else:
-            self.session_mood = 50.0 
-        
+            self.session_mood = 50.0
+
         self.is_following = False
         self.mouse_drag_pos = QPoint()
 
@@ -76,19 +76,19 @@ class DesktopPet(QWidget):
         self.is_typing = False
         self.can_skip = True
         self.is_speaking = False
-        
+
         self.is_focus_mode = False
-        self.focus_type = "normal" 
+        self.focus_type = "normal"
         self.focus_seconds = 0
         self.focus_total_seconds = 0
         self.focus_start_dt = None
         self.focus_end_dt = None
         self.hourly_triggered = False
-        self.focus_overlay = None 
-        
-        self.idle_seconds = 0   
-        self.event_seconds = 0  
-        self.note_seconds = 0   
+        self.focus_overlay = None
+
+        self.idle_seconds = 0
+        self.event_seconds = 0
+        self.note_seconds = 0
         self._pending_dialog_refreshes = set()
         self._dialog_refresh_scheduled = False
         self._alert_queue = []
@@ -99,19 +99,19 @@ class DesktopPet(QWidget):
         self._pending_type_interval = None
         self._bubble_hold_until = 0.0
         self._bubble_dispatch_pending = False
-        
+
         self.init_images()
         self.init_ui()
         self.init_timers()
-        
+
         self.chat_thread = ChatThread(self.config)
         self.chat_thread.reply_ready.connect(self.handle_api_reply)
         self.chat_thread.error_occurred.connect(self.handle_api_reply)
         self.chat_thread.api_lag_occurred.connect(self.handle_api_lag)
         self.chat_thread.summary_updated.connect(self.on_summary_updated)
-        
+
         self.last_media_title = ""
-        
+
         # ===== 生物电脉冲监测(鼠标/键盘计数，类似 bongo cat) =====
         self.session_clicks = 0
         self.session_keys = 0
@@ -355,7 +355,7 @@ class DesktopPet(QWidget):
             self.analyze_btn.setText(f"✨ 识别: {text[:8]}...") # 显示截断内容
             # 5秒后自动隐藏按钮，防止挡住桌宠
             QTimer.singleShot(5000, self.analyze_btn.hide)
-            
+
     def process_clipboard(self):
         text = self.last_clipboard
         self.analyze_btn.hide()
@@ -372,27 +372,27 @@ class DesktopPet(QWidget):
             self.last_media_title = ""
             self.media_start_time = 0
             return
-            
+
         # 开关判断
-        if not self.config.get("media_enabled", True): 
+        if not self.config.get("media_enabled", True):
             self.last_media_title = ""
             self.media_start_time = 0
             self.commented_media_title = "" # 关掉开关时也清空深度记忆
             return
-    
+
         hwnd = ctypes.windll.user32.GetForegroundWindow()
         if not hwnd: return
         title_len = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
-        if title_len == 0: return 
-        
+        if title_len == 0: return
+
         buf = ctypes.create_unicode_buffer(title_len + 1)
         ctypes.windll.user32.GetWindowTextW(hwnd, buf, title_len + 1)
         title = buf.value
-        
+
         if not title: return
-        
+
         media_list = ["网易云", "qq音乐", "酷狗音乐", "alger", "folia", "爱奇艺", "抖音", "快手", "小红书", "bilibili", "acfun", "youtube", "music", "video", "anime", "player", "播放", "音乐", "动画", "视频"]
-        
+
         if any(keyword.lower() in title.lower() for keyword in media_list):
             if title != self.last_media_title:
                 # 标题变动，锁定当前曲目，开始1秒计时
@@ -401,7 +401,7 @@ class DesktopPet(QWidget):
             elif self.media_start_time > 0 and (time.time() - self.media_start_time >= 1):
                 # 满1秒后，检查是否已经对"这个特定标题"发表过见解
                 self.media_start_time = 0 # 无论发不发，先锁住计时器
-                
+
                 if title != self.commented_media_title:
                     # 只有当标题不等于已评价过的标题时，才发送指令
                     self.commented_media_title = title # 把它加入已评价备忘录
@@ -413,7 +413,6 @@ class DesktopPet(QWidget):
             self.media_start_time = 0
 
     def handle_api_lag(self, elapsed):
-        self.change_mood(-5)
         self.inject_system_event("系统：检测到API响应卡顿", f"【angry】网络传输延迟达到了 {elapsed:.1f} 秒... 这种低效的数据链路让我非常烦躁。")
 
     def resizeEvent(self, event):
@@ -496,7 +495,7 @@ class DesktopPet(QWidget):
         self.pics = {}
         outfit = self.config.get("current_outfit", "default")
         img_list = ["normal1", "normal2", "zhayan1", "zhayan2", "biyan", "shy", "shyspeak", "angry", "angryspeak", "angrysmile", "angrysmilespeak"]
-        
+
         for name in img_list:
             prefixed = os.path.join(PIC_DIR, f"{outfit}_{name}.png")
             std = os.path.join(PIC_DIR, f"{name}.png")
@@ -512,7 +511,7 @@ class DesktopPet(QWidget):
     def init_ui(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
+
         # 使用清除布局的方式防止重复堆叠
         # 注意：原来这里写的是 self.layout = QVBoxLayout(self)，把 QWidget 自带的 layout() 方法
         # 覆盖成了一个对象。一旦 init_ui 被第二次调用，self.layout() 就会报"对象不可调用"。
@@ -522,7 +521,7 @@ class DesktopPet(QWidget):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
-        
+
         # 1. 气泡层
         self.chat_bubble = QLabel("")
         self.chat_bubble.setWordWrap(True)
@@ -532,20 +531,20 @@ class DesktopPet(QWidget):
         self.apply_bubble_style()
         self.chat_bubble.hide()
         self.main_layout.addWidget(self.chat_bubble)
-        
+
         # 2. 剪贴板识别按钮 (头顶)
         self.analyze_btn = QPushButton("✨ 识别剪贴板", self)
         self.analyze_btn.setStyleSheet("background-color: #2196F3; color: white; border-radius: 5px;")
         self.analyze_btn.hide()
         self.analyze_btn.clicked.connect(self.process_clipboard)
         self.main_layout.addWidget(self.analyze_btn)
-        
+
         # 3. 桌宠图像
         self.pet_label = QLabel()
         self.pet_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.update_idle_face()
         self.main_layout.addWidget(self.pet_label)
-        
+
         # 4. 图片附件提示条（默认隐藏，粘贴图片后出现）
         self.image_hint = QPushButton("🖼️ 已附加图片，输入文字后回车发送 · 点此取消")
         self.image_hint.setStyleSheet("background-color: #7E57C2; color: white; border-radius: 5px; font-family: 'Microsoft YaHei'; font-size: 12px; padding: 3px;")
@@ -559,9 +558,9 @@ class DesktopPet(QWidget):
         self.input_box.image_pasted.connect(self.on_image_pasted)
         self.input_box.setVisible(self.config.get("show_input_box", True))
         self.main_layout.addWidget(self.input_box)
-        
+
         # QVBoxLayout(self) 已经自动安装到窗口上，不需要再次 setLayout。
-        
+
         # 5. 系统托盘
         if not hasattr(self, 'tray_icon'):
             self.tray_icon = QSystemTrayIcon(self)
@@ -573,11 +572,11 @@ class DesktopPet(QWidget):
             self.tray_icon.setToolTip("Giegisa - 跨位面连线终端")
             self.tray_icon.activated.connect(self.tray_activated)
             self.tray_icon.show()
-        
+
         sg = QApplication.primaryScreen().availableGeometry()
         self.move(sg.width() - 400, sg.height() - 400)
-        
-        
+
+
 
     def apply_bubble_style(self):
         self.chat_bubble.setMaximumWidth(self.config["bubble_width"])
@@ -598,13 +597,13 @@ class DesktopPet(QWidget):
         self.blink_timer = QTimer(self)
         self.blink_timer.timeout.connect(self.blink_anim)
         self.blink_timer.start(random.randint(2000, 5000))
-        
+
         self.speak_timer = QTimer(self)
         self.speak_timer.timeout.connect(self.speak_anim)
-        
+
         self.type_timer = QTimer(self)
         self.type_timer.timeout.connect(self.typewriter_effect)
-        
+
         self.end_blink_timer = QTimer(self)
         self.end_blink_timer.timeout.connect(self.toggle_end_blink)
         self.end_blink_state = False
@@ -612,7 +611,7 @@ class DesktopPet(QWidget):
         self.core_clock_timer = QTimer(self)
         self.core_clock_timer.timeout.connect(self.core_clock_tick)
         self.core_clock_timer.start(1000)
-        
+
         self.clipboard_timer = QTimer(self)
         self.clipboard_timer.timeout.connect(self.check_clipboard)
         self.clipboard_timer.start(2000) # 2秒检测一次剪贴板
@@ -623,22 +622,22 @@ class DesktopPet(QWidget):
         self.media_timer.start(10000) # 10秒检测一次媒体标题
         self.last_media_title = ""
         self.media_start_time = 0 # 【新增】记录该媒体开始播放的时间点
-        
-        
+
+
 
     def core_clock_tick(self):
         now = datetime.now()
         if now.second in (0, 30):
             self.flush_input_counter()  # 每半分钟把鼠标/键盘计数存盘一次(增量，开销极小)
-        
-        if random.randint(1, 100) == 1: 
+
+        if random.randint(1, 100) == 1:
             if self.session_mood > 50:
                 self.change_mood(-1)
             elif self.session_mood < 50:
                 self.change_mood(1)
             if not self.is_speaking:
                 self.update_idle_face()
-            
+
         if now.minute == 0 and now.second == 0:
             if not self.hourly_triggered:
                 self.hourly_triggered = True
@@ -647,7 +646,7 @@ class DesktopPet(QWidget):
                     self.send_msg(f"【系统后台强制指令：当前本地时间是 {current_time_str}。请用符合性格的方式简短报时提醒。】", hidden=True)
         elif now.second > 1:
             self.hourly_triggered = False
-            
+
         # ---- 跨天翻篇：每天 0 点重置提醒标记、刷新面板 ----
         today = now.date()
         if getattr(self, "_last_seen_date", None) != today:
@@ -725,7 +724,7 @@ class DesktopPet(QWidget):
                 self.focus_seconds -= 1
                 if getattr(self, "focus_state", "work") == "work" and self.focus_seconds % 2 == 0:
                     self.check_distraction()
-                
+
             if hasattr(self, "focus_overlay") and self.focus_overlay and self.focus_overlay.isVisible():
                 self.focus_overlay.update_display()
 
@@ -739,7 +738,7 @@ class DesktopPet(QWidget):
                     self.inject_system_event(f"系统：用户完成了普通倒计时专注并获得{reward}数据碎片", f"【shy】...时间到了。勉强算你专注过了。赏你 <font color='#FFD700'>{reward} 个数据碎片</font> 吧。")
                     if self.focus_overlay:
                         self.focus_overlay.hide()
-                    
+
                 elif self.focus_type == "pomodoro":
                     if self.focus_state == "work":
                         self.focus_sets_done += 1
@@ -748,7 +747,7 @@ class DesktopPet(QWidget):
                         save_config(self.config)
                         self.change_mood(5)
                         self.inject_system_event(f"系统：用户完成了第{self.focus_sets_done}个番茄钟并获得{reward}数据碎片", f"【normal】第{self.focus_sets_done}组专注完成。拿好这 <font color='#FFD700'>{reward} 数据碎片</font>。现在允许你稍微放松一下。")
-                        
+
                         if self.focus_sets_done >= self.focus_sets_total:
                             self.is_focus_mode = False
                             self.inject_system_event("系统：番茄钟全部循环完成", "【shy】所有循环全做完了？哼，还算有点毅力。休息去吧。")
@@ -765,11 +764,11 @@ class DesktopPet(QWidget):
                         self.focus_start_dt = datetime.now()
                         self.focus_end_dt = self.focus_start_dt + timedelta(seconds=self.focus_seconds)
                         self.inject_system_event("系统：番茄钟休息结束", "【dark】休息时间到此为止。立刻回来继续专注！")
-                        
+
         self.idle_seconds += 1
         self.event_seconds += 1
         self.note_seconds += 1
-        
+
         if self.config.get("idle_chat_enabled", True):
             target_idle = self.config.get("idle_chat_interval_min", 20) * 60
             if self.idle_seconds >= target_idle:
@@ -777,7 +776,7 @@ class DesktopPet(QWidget):
                 self.idle_thread = IdleChatThread(self.config)
                 self.idle_thread.result_ready.connect(self.on_idle_chat_fetched)
                 self.idle_thread.start()
-                
+
         if self.config.get("event_enabled", True):
             target_event = self.config.get("event_interval_min", 60) * 60
             if self.event_seconds >= target_event:
@@ -785,7 +784,7 @@ class DesktopPet(QWidget):
                 self.event_thread = RandomEventThread(self.config)
                 self.event_thread.result_ready.connect(self.on_random_event_fetched)
                 self.event_thread.start()
-                
+
         if self.config.get("read_notes_enabled", True):
             target_note = self.config.get("read_notes_interval_min", 30) * 60
             if self.note_seconds >= target_note:
@@ -796,7 +795,7 @@ class DesktopPet(QWidget):
                     if n.get("status") == "active":
                         if read_folder == "所有便签" or n.get("folder", "默认便签") == read_folder:
                             active_notes.append(n)
-                            
+
                 if active_notes:
                     note = random.choice(active_notes)
                     self.inject_system_event("系统：Giegisa随机翻阅了便签", f"【normal】随手翻到了你留的一笔便签：「{note['text']}」。最好别忘了它。")
@@ -804,13 +803,13 @@ class DesktopPet(QWidget):
     def check_distraction(self):
         if not self.config.get("distraction_intercept_enabled", True):
             return
-            
+
         hwnd = ctypes.windll.user32.GetForegroundWindow()
         length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
         buf = ctypes.create_unicode_buffer(length + 1)
         ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
         window_title = buf.value.lower()
-        
+
         for kw, is_enabled in self.config.get("distraction_keywords", {}).items():
             if is_enabled and kw.lower() in window_title:
                 self.change_mood(-15)
@@ -870,13 +869,13 @@ class DesktopPet(QWidget):
 
         if not hasattr(self, "focus_overlay") or self.focus_overlay is None:
             self.focus_overlay = FocusOverlay(self)
-            
+
         is_top = bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
         if is_top:
             self.focus_overlay.setWindowFlags(self.focus_overlay.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         else:
             self.focus_overlay.setWindowFlags(self.focus_overlay.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
-            
+
         self.focus_overlay.move(self.x() - 150, self.y() - 50)
         self.focus_overlay.show()
         self.focus_overlay.update_display()
@@ -891,14 +890,14 @@ class DesktopPet(QWidget):
         self.is_focus_mode = False
         if hasattr(self, "focus_overlay") and self.focus_overlay:
             self.focus_overlay.hide()
-            
+
         if self.focus_type == "stopwatch":
             mins = self.focus_seconds // 60
         elif self.focus_type == "normal":
             mins = (self.focus_total_seconds - self.focus_seconds) // 60
-        else: 
+        else:
             mins = self.focus_sets_done * self.focus_work_duration
-            
+
         reward = mins * 1
         self.config["coins"] += reward
         save_config(self.config)
@@ -922,8 +921,8 @@ class DesktopPet(QWidget):
 
     def draw_tarot(self):
         tarot_cards = [
-            "愚者", "魔术师", "女祭司", "女皇", "皇帝", "教皇", "恋人", "战车", 
-            "力量", "隐士", "命运之轮", "正义", "倒吊人", "死神", "节制", "恶魔", 
+            "愚者", "魔术师", "女祭司", "女皇", "皇帝", "教皇", "恋人", "战车",
+            "力量", "隐士", "命运之轮", "正义", "倒吊人", "死神", "节制", "恶魔",
             "高塔", "星星", "月亮", "太阳", "审判", "世界"
         ]
         card = random.choice(tarot_cards)
@@ -934,36 +933,36 @@ class DesktopPet(QWidget):
     def update_image(self, img_key):
         if img_key in self.pics:
             scaled_pixmap = self.pics[img_key].scaled(
-                self.scale_size, self.scale_size, 
-                Qt.AspectRatioMode.KeepAspectRatio, 
+                self.scale_size, self.scale_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
             self.pet_label.setPixmap(scaled_pixmap)
-            
+
     def change_mood(self, delta):
         self.session_mood = max(0.0, min(100.0, self.session_mood + delta))
         self.total_mood = max(0.0, min(100.0, self.total_mood + delta * 0.2))
         self.config["total_mood"] = self.total_mood
         save_config(self.config, force=False)
         self.update_idle_face()
-        
+
         if hasattr(self, 'dlg_MoodDialog') and getattr(self, 'dlg_MoodDialog'):
             try:
                 self.dlg_MoodDialog.update_display()
             except RuntimeError:
                 pass
-                
+
     def update_idle_face(self):
-        if self.session_mood < 30: 
+        if self.session_mood < 30:
             face = "angry"
-        elif self.total_mood >= 76 and self.config.get("allow_blush", False): 
+        elif self.total_mood >= 76 and self.config.get("allow_blush", False):
             face = "shy"
         else:
             face = "normal1"
         self.update_image(face)
 
     def blink_anim(self):
-        if self.is_speaking: return 
+        if self.is_speaking: return
         self.update_image("zhayan1")
         QTimer.singleShot(50, lambda: self.update_image("zhayan2"))
         QTimer.singleShot(150, self.update_idle_face)
@@ -974,18 +973,18 @@ class DesktopPet(QWidget):
             self.speak_timer.stop()
             self.update_idle_face()
             return
-            
+
         speak_map = {
-            "normal": ("normal1", "normal2"), 
+            "normal": ("normal1", "normal2"),
             "shy": ("shy", "shyspeak"),
-            "angry": ("angry", "angryspeak"), 
+            "angry": ("angry", "angryspeak"),
             "dark": ("angrysmile", "angrysmilespeak")
         }
         frames = speak_map.get(self.current_emotion, ("normal1", "normal2"))
-        
+
         if not hasattr(self, "speak_toggle"):
             self.speak_toggle = False
-            
+
         self.speak_toggle = not self.speak_toggle
         self.update_image(frames[1] if self.speak_toggle else frames[0])
 
@@ -1028,24 +1027,24 @@ class DesktopPet(QWidget):
         if not hidden:
             self.input_box.clear()
             self.clear_pending_image()   # 图片发出后清空附件与提示条
-            self.show_bubble("...") 
-            self.update_image("biyan") 
-            
+            self.show_bubble("...")
+            self.update_image("biyan")
+
         pos_words = ["喜欢", "爱", "谢谢", "好棒", "贴贴", "摸摸", "乖", "厉害", "赞", "可爱"]
         neg_words = ["傻", "笨", "滚", "去死", "闭嘴", "垃圾", "讨厌", "废", "烦", "慢"]
-        
+
         if any(w in msg for w in pos_words):
             self.change_mood(2)
         if any(w in msg for w in neg_words):
             self.change_mood(-5)
 
-        if self.session_mood > 75: 
+        if self.session_mood > 75:
             mood_state = "【情绪状态：Happy (极佳)】此刻心情很好。语气允许微傲娇、放松，甚至可以稍微对用户展现出一丝关心。"
-        elif self.session_mood < 30: 
+        elif self.session_mood < 30:
             mood_state = "【情绪状态：Sad/Angry (烦躁)】刚刚遭遇卡顿或负面事件，极其不爽。展现出冷酷、不耐烦的S属性，回复必须【极端简短、冰冷】。"
-        else: 
+        else:
             mood_state = "【情绪状态：Normal (平常)】平稳运行中。保持高冷、冷静、可靠的女王属性常规姿态。"
-        
+
         prof = self.config.get("user_profile", {})
         prof_info = ""
         if prof.get("nickname") or prof.get("relationship"):
@@ -1064,7 +1063,7 @@ class DesktopPet(QWidget):
                                 f"现在是 {datetime.now().strftime('%Y-%m-%d %H:%M')}。{snapshot}]")
             except Exception:
                 pass
-        
+
         self.chat_thread.send_message(msg, mood_prompt, image_b64=image_b64, image_mime=image_mime)
 
     def on_idle_chat_fetched(self, text):
@@ -1090,7 +1089,7 @@ class DesktopPet(QWidget):
                 self.dlg_HistoryDialog.refresh_list()
             except RuntimeError:
                 pass
-                
+
         # 只拦截模型明显在复读后台指令的异常回复。
         # 正常回答中偶然提到这几个字时，不应该把整条回复吞掉。
         if reply_text.strip().startswith(
@@ -1112,7 +1111,7 @@ class DesktopPet(QWidget):
                 self._bubble_queue = self._bubble_queue[-8:]
             self._schedule_next_bubble(int(hold_left * 1000) + 20)
             return
-        
+
         self.current_emotion = "normal"
 
         match = _EMOTION_TOKEN_RE.search(reply_text)
@@ -1121,16 +1120,16 @@ class DesktopPet(QWidget):
             if emo in ["shy", "angry", "dark"]:
                 self.current_emotion = emo
         reply_text = sanitize_bubble_text(reply_text)
-     
+
         # --- 解析 Markdown 图片链接 ---
         img_urls = re.findall(r'!\[.*?\]\((.*?)\)', reply_text)
         # 从文字气泡中把这串杂乱的链接抹掉
         reply_text = re.sub(r'!\[.*?\]\(.*?\)', '', reply_text).strip()
-        
+
         # 为每张图片生成独立的悬浮气泡
         for url in img_urls:
             self.show_image_bubble(url)
-            
+
         self.full_text = reply_text
         self._pending_type_interval = type_interval
         if self.full_text:
@@ -1146,7 +1145,7 @@ class DesktopPet(QWidget):
         offset_y = random.randint(-50, 50)
         img_bubble.move(self.x() - 150 + offset_x, self.y() - 150 + offset_y)
         img_bubble.show()
-        
+
         thread = ImageFetchThread(url)
         # 挂载在主类防止被内存回收机制闪退清理
         if not hasattr(self, 'img_threads'):
@@ -1171,7 +1170,7 @@ class DesktopPet(QWidget):
         self.can_skip = True
         self.is_speaking = True
         self.end_blink_timer.stop()
-        
+
         self.chat_bubble.show()
         self.speak_timer.start(200)
         interval = self._pending_type_interval
@@ -1185,7 +1184,7 @@ class DesktopPet(QWidget):
                 if end_idx != -1:
                     self.display_text += self.full_text[self.text_index:end_idx+1]
                     self.text_index = end_idx + 1
-                    return 
+                    return
             self.display_text += self.full_text[self.text_index]
             self.chat_bubble.setText(self.display_text)
             # 外层 adjustSize 会连带更新气泡；不再为每个字重复做两次布局。
@@ -1199,7 +1198,7 @@ class DesktopPet(QWidget):
         self.is_typing = False
         self.is_speaking = False
         self.end_blink_state = True
-        self.toggle_end_blink() 
+        self.toggle_end_blink()
         self.end_blink_timer.start(500)
         self._bubble_hold_until = time.time() + 1.2
         if self._bubble_queue:
@@ -1233,7 +1232,7 @@ class DesktopPet(QWidget):
             if self.is_typing and self.can_skip:
                 self.display_text = self.full_text
                 self.finish_typing()
-                self.can_skip = False 
+                self.can_skip = False
                 self.chat_bubble.adjustSize()
                 self.adjustSize()
                 QTimer.singleShot(300, lambda: setattr(self, 'can_skip', True))
@@ -1241,11 +1240,11 @@ class DesktopPet(QWidget):
                 self.end_blink_timer.stop()
                 self.chat_bubble.hide()
                 self._bubble_hold_until = 0.0
-                self.adjustSize() 
+                self.adjustSize()
                 QTimer.singleShot(0, self._play_next_bubble)
 
     def mousePressEvent(self, event):
-        self.idle_seconds = 0 
+        self.idle_seconds = 0
         if not getattr(self, "global_input_hook_active", False):
             self.session_clicks = getattr(self, "session_clicks", 0) + 1  # 未装 pynput 时的兜底计数
         if event.button() == Qt.MouseButton.LeftButton:

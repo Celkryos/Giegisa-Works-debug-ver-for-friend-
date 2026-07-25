@@ -1,7 +1,8 @@
 import os
 import json
-import time
 import re
+import threading
+import time
 from PyQt6.QtCore import QThread, pyqtSignal
 from config import HISTORY_FILE, HISTORY_BAK, BASE_DIR, _atomic_write_json, _read_json, save_config, LOAD_WARNINGS
 from api import gemini_rest_generate, openai_chat
@@ -59,7 +60,7 @@ class ChatThread(QThread):
         if len(self.history) <= self.HISTORY_HARD_CAP:
             return
         cut = len(self.history) - self.HISTORY_HARD_CAP
-        cut -= cut % 2  # 保证按“一问一答”成对搬走，不打乱配对关系
+        cut -= cut % 2  # 保证按"一问一答"成对搬走，不打乱配对关系
         if cut <= 0:
             return
         moved = self.history[:cut]
@@ -100,7 +101,7 @@ class ChatThread(QThread):
         self.config = new_config
 
     def _compose_system_prompt(self):
-        # 把“人设 + 反臆造守则 + 当前情绪”拼成一段系统指令。
+        # 把"人设 + 反臆造守则 + 当前情绪"拼成一段系统指令。
         # 放在系统指令里(而不是每轮塞进历史)：token更省、约束更稳、也不会把历史记录越撑越大。
         parts = [self.config.get("system_prompt", "")]
         note = (self.config.get("anti_hallucination_note", "") or "").strip()
@@ -152,8 +153,26 @@ class ChatThread(QThread):
         self.history.append({"role": "assistant", "content": reply, "timestamp": now_ts})
         self.save_history()
         self.reply_ready.emit(reply)
-        # 在发完回复后，静默检查是否需要滚雪球式更新摘要
-        self.check_and_auto_summarize()
+        # 在发完回复后，静默检查是否需要滚雪球式更新摘要。
+        # 放在独立线程里执行，避免阻塞 run() 导致下一条消息排队。
+        if self._summarize_needed():
+            threading.Thread(target=self._summarize_async, daemon=True).start()
+
+    def _summarize_needed(self):
+        limit_rounds = self.config.get("history_limit", 50)
+        if limit_rounds <= 0:
+            return False
+        limit_count = limit_rounds * 2
+        last_idx = max(0, min(self.config.get("last_summarized_index", 0), len(self.history)))
+        self.config["last_summarized_index"] = last_idx
+        unsummarized_count = len(self.history) - limit_count - last_idx
+        return unsummarized_count >= 20
+
+    def _summarize_async(self):
+        try:
+            self.check_and_auto_summarize()
+        except Exception as e:
+            print(f"[后台记忆提炼失败]: {e}")
 
     def check_and_auto_summarize(self):
         """检查历史记录是否超限，并在后台悄悄触发大模型自动融合长期摘要（无损本地历史版）"""
@@ -166,12 +185,12 @@ class ChatThread(QThread):
         last_idx = max(0, min(self.config.get("last_summarized_index", 0), len(self.history)))
         self.config["last_summarized_index"] = last_idx
         
-        # 计算当前有多少条“已经溢出，但还没被提炼”的旧对话
+        # 计算当前有多少条"已经溢出，但还没被提炼"的旧对话
         unsummarized_count = len(self.history) - limit_count - last_idx
         
         # 为了防止频繁调用API造成网络卡顿，积攒了超过 20 条（10轮）溢出对话时，才集中提炼一次
         if unsummarized_count >= 20:
-            # 只抓取“书签”之后的这部分旧对话进行提炼
+            # 只抓取"书签"之后的这部分旧对话进行提炼
             overflow_data = self.history[last_idx : last_idx + unsummarized_count]
             
             overflow_text = ""
@@ -197,7 +216,11 @@ class ChatThread(QThread):
                 else:
                     new_summary = openai_chat(self.config, [{"role": "user", "content": prompt}], temperature=0.6, timeout=40)
                 
-                new_summary = re.sub(r'\[.*?\]', '', new_summary).strip()
+                # 只清理系统注入的标签，不删合法方括号内容
+                new_summary = re.sub(
+                    r'\[(?:系统|后台|情绪状态|事实数据)[^\]]*\]',
+                    '', new_summary,
+                ).strip()
                 
                 if new_summary and len(new_summary) > 5:
                     # 1. 把提炼出来的成果写入 config
