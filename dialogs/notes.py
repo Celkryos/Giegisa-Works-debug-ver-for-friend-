@@ -1,12 +1,14 @@
 from .common import *
 
 class EditNoteDialog(QDialog):
-    """【新增】便签热编辑面板"""
-    def __init__(self, pet, note):
-        super().__init__(pet)
-        self.pet = pet
+    """便签热编辑面板 —— 以调用方对话框为 parent，避免模态锁死整个应用。"""
+    def __init__(self, parent, note):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.parent_dialog = parent
         self.note = note
         self.setWindowTitle("✏️ 编辑便签")
+        self.setWindowFlags(Qt.WindowType.Dialog)
         self.resize(400, 300)
         self.layout = QVBoxLayout(self)
         
@@ -22,8 +24,10 @@ class EditNoteDialog(QDialog):
     def save_edit(self):
         self.note["text"] = self.text_edit.toPlainText().strip()
         self.accept()
+        # 通过 parent_dialog 找到 pet 来保存和刷新
+        pet = self.parent_dialog.pet if hasattr(self.parent_dialog, "pet") else self.parent_dialog
         QTimer.singleShot(
-            0, lambda pet=self.pet: (
+            0, lambda: (
                 save_config(pet.config),
                 pet.refresh_dialogs("dlg_NotesManagerDialog")))
 
@@ -63,8 +67,8 @@ class QuickNoteDialog(QDialog):
         try:
             with open(txt_path, 'a', encoding='utf-8') as f:
                 f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {text}\n")
-        except Exception as e:
-            print(f"[便签文本备份写入失败] {e}")
+        except Exception:
+            pass  # notes.txt 只是额外备份，写入失败不影响主流程
             
         self.pet.config.setdefault("notes", []).append({
             "id": new_id(), 
@@ -294,8 +298,8 @@ class NotesManagerDialog(QDialog):
             self.list_widget.setItemWidget(item, item_widget)
 
     def open_editor(self, note):
-        dlg = EditNoteDialog(self.pet, note)
-        if dlg.exec(): 
+        dlg = EditNoteDialog(self, note)
+        if dlg.exec():
             self.refresh_list()
 
     def toggle_pin(self, note):

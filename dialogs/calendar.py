@@ -74,9 +74,10 @@ class EditScheduleDialog(QDialog):
     这里是“日程 ↔ 日历”联动的核心：可以自由选择是否绑定日期，
     绑定后还能设定 每天/每周/每月/每年/每N天 的重复周期。
     """
-    def __init__(self, parent_pet, sched=None, default_date=None, default_category=None):
-        super().__init__(parent_pet)
-        self.pet = parent_pet
+    def __init__(self, parent, sched=None, default_date=None, default_category=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.pet = parent.pet if hasattr(parent, "pet") else parent
         self.sched = sched                      # None 表示新建
         self.is_new = sched is None
         self.setWindowTitle("✏️ 编辑日程" if not self.is_new else "➕ 新建日程")
@@ -200,9 +201,10 @@ class EditScheduleDialog(QDialog):
 
 class EditCheckinDialog(QDialog):
     """➕ 新建 / ✏️ 编辑 每日打卡项目"""
-    def __init__(self, parent_pet, item=None):
-        super().__init__(parent_pet)
-        self.pet = parent_pet
+    def __init__(self, parent, item=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.pet = parent.pet if hasattr(parent, "pet") else parent
         self.item = item
         self.is_new = item is None
         self.setWindowTitle("✏️ 编辑打卡项目" if not self.is_new else "➕ 新建打卡项目")
@@ -531,14 +533,14 @@ class ScheduleDialog(QDialog):
         self.refresh_list()
 
     def edit_task(self, sched):
-        dlg = EditScheduleDialog(self.pet, sched=sched)
+        dlg = EditScheduleDialog(self, sched=sched)
         dlg.exec()
         self.refresh_list()
 
     def mark_done(self, sched, done=True):
         self.pet.mark_schedule_done(sched, date.today(), done)
         self.refresh_list()
-        
+
     def hide_task(self, sched):
         sched["status"] = "hidden"
         save_config(self.pet.config)
@@ -548,7 +550,7 @@ class ScheduleDialog(QDialog):
         sched["status"] = "pending"
         save_config(self.pet.config)
         self.refresh_list()
-        
+
     def del_task(self, sched):
         if QMessageBox.question(self, "确认删除", f"确定删除「{sched.get('task','')}」吗？",
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -566,7 +568,7 @@ class ScheduleDialog(QDialog):
         self.refresh_list()
 
     def add_detailed(self):
-        dlg = EditScheduleDialog(self.pet, default_category=self.cat_combo.currentText())
+        dlg = EditScheduleDialog(self, default_category=self.cat_combo.currentText())
         dlg.exec()
         self.refresh_list()
 
@@ -686,11 +688,11 @@ class DayDetailDialog(QDialog):
         self.refresh_list()
 
     def edit(self, sched):
-        EditScheduleDialog(self.pet, sched=sched).exec()
+        EditScheduleDialog(self, sched=sched).exec()
         self.refresh_list()
 
     def add_here(self):
-        EditScheduleDialog(self.pet, default_date=self.the_date).exec()
+        EditScheduleDialog(self, default_date=self.the_date).exec()
         self.refresh_list()
 
     def speak(self):
@@ -945,7 +947,7 @@ class MiniCalendarDialog(QDialog):
             self.pet.speak_today_plan(d)
 
     def add_on_selected(self):
-        EditScheduleDialog(self.pet, default_date=self.sel_date).exec()
+        EditScheduleDialog(self, default_date=self.sel_date).exec()
         self.refresh_list()
 
     def open_detail(self):
@@ -1063,11 +1065,11 @@ class CheckinDialog(QDialog):
         self.refresh_list()
 
     def add_item(self):
-        EditCheckinDialog(self.pet).exec()
+        EditCheckinDialog(self).exec()
         self.refresh_list()
 
     def edit(self, item):
-        EditCheckinDialog(self.pet, item=item).exec()
+        EditCheckinDialog(self, item=item).exec()
         self.refresh_list()
 
     def toggle_archive(self, item):
