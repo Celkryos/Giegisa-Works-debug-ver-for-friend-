@@ -3,9 +3,22 @@ import json
 import re
 import threading
 import time
+from datetime import datetime
 from PyQt6.QtCore import QThread, pyqtSignal
 from config import HISTORY_FILE, HISTORY_BAK, BASE_DIR, _atomic_write_json, _read_json, save_config, LOAD_WARNINGS
 from api import gemini_rest_generate, openai_chat
+
+_LOG_FILE = os.path.join(BASE_DIR, "giegisa.log")
+
+
+def _log(*args):
+    """写日志到文件 —— pythonw.exe 无控制台，print 不可见。"""
+    try:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {' '.join(str(a) for a in args)}\n")
+    except Exception:
+        pass
 
 class ChatThread(QThread):
     reply_ready = pyqtSignal(str)
@@ -75,7 +88,7 @@ class ChatThread(QThread):
             if not _atomic_write_json(archive_path, old + moved, indent=1):
                 return
         except Exception as e:
-            print(f"[历史归档失败] {e}")
+            _log(f"[历史归档失败] {e}")
             return
         # 只有确认归档已经安全落盘后，才从当前历史中移走旧记录。
         # 原实现先截断内存，归档写入失败时会静默丢掉最旧的对话。
@@ -172,7 +185,7 @@ class ChatThread(QThread):
         try:
             self.check_and_auto_summarize()
         except Exception as e:
-            print(f"[后台记忆提炼失败]: {e}")
+            _log(f"[后台记忆提炼失败]: {e}")
 
     def check_and_auto_summarize(self):
         """检查历史记录是否超限，并在后台悄悄触发大模型自动融合长期摘要（无损本地历史版）"""
@@ -236,7 +249,7 @@ class ChatThread(QThread):
                     self.summary_updated.emit(new_summary)
             except Exception as e:
                 # 静默失败，不打扰玩家
-                print(f"[后台记忆提炼失败]: {str(e)}")
+                _log(f"[后台记忆提炼失败]: {str(e)}")
 
     def _run_gemini(self):
         try:

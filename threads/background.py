@@ -5,9 +5,23 @@ import re
 import time
 import base64
 import urllib.request
+from datetime import datetime
 from PyQt6.QtCore import QThread, pyqtSignal
 from config import BASE_DIR, save_config
 from api import gemini_rest_generate, openai_chat
+
+_LOG_FILE = os.path.join(BASE_DIR, "giegisa.log")
+
+
+def _log(*args):
+    """写日志到文件 —— pythonw.exe 无控制台，print 不可见。"""
+    try:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {' '.join(str(a) for a in args)}\n")
+    except Exception:
+        pass
+
 
 class TriviaThread(QThread):
     result_ready = pyqtSignal(str)
@@ -61,7 +75,7 @@ class IdleChatThread(QThread):
                                     temperature=0.8, timeout=45)
             self.result_ready.emit(reply.strip())
         except Exception as e:
-            print(f"[闲聊线程失败] {e}")
+            _log(f"[闲聊线程失败] {e}")
 
 class RandomEventThread(QThread):
     result_ready = pyqtSignal(dict)
@@ -94,11 +108,11 @@ class RandomEventThread(QThread):
             data = json.loads(reply)
             self.result_ready.emit(data)
         except json.JSONDecodeError as e:
-            print(f"[小剧场] JSON 解析失败: {e}")
-            print(f"[小剧场] 提取到的片段: {(reply or '')[:200]}")
+            _log(f"[小剧场] JSON 解析失败: {e}")
+            _log(f"[小剧场] 提取到的片段: {(reply or '')[:200]}")
         except Exception as e:
-            print(f"[小剧场] API 调用失败: {e}")
-            print(f"[小剧场] 请检查 API Key 与模型名称是否已配置")
+            _log(f"[小剧场] API 调用失败: {e}")
+            _log(f"[小剧场] 请检查 API Key 与模型名称是否已配置")
 
 class DataRetrievalThread(QThread):
     result_ready = pyqtSignal(str)
