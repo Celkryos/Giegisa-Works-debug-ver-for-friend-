@@ -1,0 +1,7 @@
+PyQt6>=6.9,<7
+pynput>=1.8,<2
+openai>=1.0,<3
+PyInstaller>=6.15,<7
+charset-normalizer>=3.4,<4
+pypdf>=5,<7
+PyMuPDF>=1.26,<2

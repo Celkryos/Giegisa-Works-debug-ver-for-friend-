@@ -1,0 +1,68 @@
+Giegisa 桌宠源码结构说明
+========================
+
+启动入口
+--------
+oc.py
+    只保留桌宠主窗口 DesktopPet、右键菜单装配和程序启动入口。
+
+基础设置
+--------
+config.py
+    默认配置、配置读取与保存、历史记录归档。
+
+core/
+    utils.py       日程、打卡、重复规则、迁移与通用工具。
+    nl_parser.py   自然语言日程解析。
+    ebook.py       TXT/HTML/EPUB/PDF 编码识别、章节与图片提取。
+
+AI 通讯
+-------
+api/
+    gemini.py          Gemini REST 接口；代理只对本次请求生效。
+    openai_compat.py   OpenAI 兼容接口，可用于硅基流动等服务。
+
+线程
+----
+threads/
+    chat.py        主聊天线程和提示词组装。
+    background.py  后台总结、检查、随机事件等线程。
+
+UI
+--
+ui/
+    theme.py       冰蓝像素玻璃主题。
+    widgets.py     通用控件。
+    constants.py   UI 常量。
+
+功能窗口
+--------
+dialogs/
+    calendar.py      日历、日程、打卡、统计。
+    notes.py         便签功能。
+    settings.py      用户资料、API、外观、专注、记忆等设置。
+    library.py       收藏、商店、历史记录。
+    random_event.py  随机事件窗口。
+    ebook.py         书架、阅读器、排版、搜索、标记与自动阅读。
+
+兼容入口
+--------
+ui_theme.py
+    保留旧版导入路径，实际转到 ui/theme.py。
+
+运行与安装
+----------
+1. 双击 install.bat 安装依赖。
+2. 双击 run.bat 启动。
+3. 调试时双击 debug.bat。
+4. 打包时运行 pack.bat（若交接包中提供），或使用：
+   .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean Giegisa.spec
+
+重要说明
+--------
+- config.json、history.json、notes.txt 和 ebook_library/ 属于个人数据，不放入源码交接包。
+- 程序第一次运行时会自动创建缺失的配置和数据文件。
+- 默认 Gemini 模型为 gemini-3.5-flash。
+- 不要在 api/openai_compat.py 中手工拼接 /chat/completions；
+  OpenAI SDK 会自动拼接该路径。
+- 修改提示词时请集中检查 config.py 与 threads/chat.py，避免无意改变角色设定。

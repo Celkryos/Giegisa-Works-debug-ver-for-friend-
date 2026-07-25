@@ -1,0 +1,121 @@
+Giegisa 开发环境安装与打包步骤
+================================
+
+适用系统：Windows 10 / Windows 11 64 位
+
+
+第一步：安装 Python
+--------------------
+
+推荐使用 Python 3.13 64 位版。
+
+官方下载页面：
+https://www.python.org/downloads/release/python-31314/
+
+进入页面后下载：
+Windows installer (64-bit)
+
+安装时一定要勾选：
+Add Python to PATH
+
+然后选择 Install Now。
+安装完成后建议重启电脑。
+
+
+第二步：安装 Giegisa 的依赖
+----------------------------
+
+1. 回到本项目文件夹。
+2. 双击 install.bat。
+3. 等待自动下载和安装。
+4. 看到“安装成功”后按任意键关闭。
+
+install.bat 会在项目中建立一个名为 .venv 的专用环境，不会把各种组件散装到系统中。
+
+实际安装的组件：
+
+1. PyQt6
+   用于桌宠窗口、按钮、日历、菜单和其他界面。
+
+2. pynput
+   用于统计全局鼠标点击和键盘敲击。
+
+3. PyInstaller
+   用于生成发给别人的免 Python EXE。
+
+程序的网络请求使用 Python 自带的 urllib，因此不需要安装 openai 或
+google-generativeai。删除这两个大依赖可以减小发布体积。
+
+
+第三步：在源码模式下运行
+--------------------------
+
+双击 run.bat。
+
+它会自动使用：
+.venv\Scripts\pythonw.exe
+
+所以安装成功后，不会再出现“Windows 找不到 pythonw”的弹窗。
+
+
+第四步：生成发给别人的版本
+----------------------------
+
+1. 先退出正在运行的 Giegisa。
+2. 双击 pack.bat。
+3. 等待窗口显示“打包成功”。
+4. 打开项目里的 release 文件夹。
+5. 将下面这个文件发给别人：
+
+Giegisa桌宠-发布版.zip
+
+对方不需要安装 Python，也不需要运行 install.bat。
+
+
+第五步：发布前的隐私检查
+--------------------------
+
+pack.bat 只会放入：
+
+- Giegisa.exe
+- pictures 文件夹
+- 使用说明.txt
+
+它不会放入：
+
+- config.json（可能含 API Key 和个人档案）
+- history.json（聊天记录）
+- notes.txt（便签）
+- config.json.bak / history.json.bak
+- 源代码和测试文件
+
+不要手工把自己的整个开发文件夹直接压缩发给别人。
+
+
+可选：安装 Microsoft Visual C++ 运行库
+---------------------------------------
+
+大多数 Windows 10/11 电脑已经具备。如果安装 Python 或运行 EXE 时出现
+“缺少 VCRUNTIME、MSVCP、DLL”一类提示，可安装微软官方 x64 运行库：
+
+https://aka.ms/vc14/vc_redist.x64.exe
+
+
+常见问题
+--------
+
+1. install.bat 仍说找不到 Python：
+   重新安装 Python，确认勾选 Add Python to PATH，然后重启电脑。
+
+2. 下载组件很慢：
+   脚本会先使用清华镜像；镜像失败后会自动改用官方源。
+
+3. pack.bat 说尚未安装环境：
+   先运行 install.bat，并确认最终显示“安装成功”。
+
+4. 发布版桌宠显示灰色方块：
+   对方只拿走了 EXE，没有保留同目录的 pictures 文件夹。
+
+5. Windows 显示“未知发布者”：
+   个人软件没有商业数字签名时属于正常现象。不要要求接收者关闭杀毒软件，
+   只应从可信来源接收和运行。
