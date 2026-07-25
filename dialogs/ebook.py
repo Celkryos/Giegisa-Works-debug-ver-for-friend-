@@ -745,8 +745,13 @@ class EbookReaderDialog(QDialog):
     def repaginate(self, absolute_position=None):
         if not self.parsed:
             return
+        # 首次调用时 widget 可能尚未 layout，viewport 返回默认尺寸（~100×30）。
+        # 此时跳过，由后续 resizeEvent → _resize_repaginate 在正确尺寸下补上。
+        if self.text.viewport().width() < 100 or self.text.viewport().height() < 100:
+            return
         position = self._page_start() if absolute_position is None and self.pages else int(absolute_position or 0)
         capacity = self._page_capacity()
+        sorted_images = sorted(self.block_image_positions)
         pages = []
         start = 0
         while start < len(self.full_text):
@@ -758,8 +763,7 @@ class EbookReaderDialog(QDialog):
                 continue
             target = min(len(self.full_text), start + capacity)
             next_image = next(
-                (pos for pos in sorted(self.block_image_positions)
-                 if start < pos < target),
+                (pos for pos in sorted_images if start < pos < target),
                 None)
             if next_image is not None:
                 target = next_image
@@ -1953,9 +1957,10 @@ class EbookShelfDialog(QDialog):
         existing = next((
             book for book in self.books()
             if (os.path.abspath(book.get("path", "")) == absolute
-                or fingerprint and book.get("source_hash") == fingerprint
+                or (fingerprint and book.get("source_hash") == fingerprint)
                 or (
-                    not os.path.isfile(_relocate_managed_book(book))
+                    not book.get("source_hash")  # 旧记录缺 hash 时才能用弱匹配兜底
+                    and not os.path.isfile(_relocate_managed_book(book))
                     and Path(book.get("title", "")).stem.casefold().strip() == source_title
                     and int(book.get("size", -1)) == source_size))
         ), None)

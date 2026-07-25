@@ -297,7 +297,7 @@ class DesktopPet(QWidget):
     def build_plan_text(self, d=None, for_ai=True):
         """
         把某一天的真实日程/打卡拼成一段文字。
-        这是“防瞎编”的关键：直接把真实数据喂给模型，它就没有编造的空间了。
+        这是"防瞎编"的关键：直接把真实数据喂给模型，它就没有编造的空间了。
         """
         d = d or date.today()
         items = schedules_of_day(self.config, d)
@@ -334,7 +334,7 @@ class DesktopPet(QWidget):
     def daily_rollover(self):
         """
         跨天处理（每天 0 点自动触发一次）：
-        - 把所有日程的“今天提醒过了”标记清零，这样每天到点都会重新提醒
+        - 把所有日程的"今天提醒过了"标记清零，这样每天到点都会重新提醒
         - 刷新已经打开的日历/打卡面板
         """
         for s in self.config.get("schedules", []):
@@ -366,7 +366,7 @@ class DesktopPet(QWidget):
         if not hasattr(self, 'commented_media_title'):
             self.commented_media_title = ""
 
-        # 专注模式中，媒体类窗口应只触发“摸鱼拦截”，不再同时触发普通媒体点评，
+        # 专注模式中，媒体类窗口应只触发"摸鱼拦截"，不再同时触发普通媒体点评，
         # 否则会出现一边训斥摸鱼、一边兴致勃勃点评视频的冲突回复。
         if self.is_focus_mode:
             self.last_media_title = ""
@@ -399,7 +399,7 @@ class DesktopPet(QWidget):
                 self.last_media_title = title
                 self.media_start_time = time.time()
             elif self.media_start_time > 0 and (time.time() - self.media_start_time >= 1):
-                # 满1秒后，检查是否已经对“这个特定标题”发表过见解
+                # 满1秒后，检查是否已经对"这个特定标题"发表过见解
                 self.media_start_time = 0 # 无论发不发，先锁住计时器
                 
                 if title != self.commented_media_title:
@@ -431,7 +431,7 @@ class DesktopPet(QWidget):
 
     def init_input_counter(self):
         # 尝试用 pynput 做全局计数(统计整台电脑的点击/敲击，像 bongo cat)。
-        # 没装 pynput 也绝不会崩：会自动退回“只统计点在桌宠身上的点击”。
+        # 没装 pynput 也绝不会崩：会自动退回"只统计点在桌宠身上的点击"。
         try:
             from pynput import mouse as _pmouse, keyboard as _pkeyboard
 
@@ -454,7 +454,7 @@ class DesktopPet(QWidget):
             self.global_input_hook_active = False
 
     def flush_input_counter(self, force=False):
-        # 把“本次新增”的点击/敲击累加进长期总数并存盘(增量方式，避免重复计数)。
+        # 把"本次新增"的点击/敲击累加进长期总数并存盘(增量方式，避免重复计数)。
         try:
             d_click = self.session_clicks - self._flushed_clicks
             d_key = self.session_keys - self._flushed_keys
@@ -515,7 +515,7 @@ class DesktopPet(QWidget):
         
         # 使用清除布局的方式防止重复堆叠
         # 注意：原来这里写的是 self.layout = QVBoxLayout(self)，把 QWidget 自带的 layout() 方法
-        # 覆盖成了一个对象。一旦 init_ui 被第二次调用，self.layout() 就会报“对象不可调用”。
+        # 覆盖成了一个对象。一旦 init_ui 被第二次调用，self.layout() 就会报"对象不可调用"。
         # 改名成 main_layout，彻底避开这个坑。
         if self.layout():
             QWidget().setLayout(self.layout())
@@ -712,7 +712,7 @@ class DesktopPet(QWidget):
                     f"【normal】今天的阅读目标还没完成。至少打开静默阅读舱读 "
                     f"<font color='#4169E1'>{ebook_settings.get('daily_goal_minutes', 5)} 分钟</font>。")
 
-        # ---- 把攒下的“非关键改动”统一落盘，避免频繁写磁盘 ----
+        # ---- 把攒下的"非关键改动"统一落盘，避免频繁写磁盘 ----
         if now.second % 5 == 0:
             flush_config_if_dirty(self.config)
 
@@ -1053,7 +1053,7 @@ class DesktopPet(QWidget):
 
         mood_prompt = f"\n[后台状态干预：当前你的沟通情绪值是{int(self.session_mood)}/100，总好感度{int(self.total_mood)}/100，状态为：{mood_state}。请绝对遵循此状态输出回复。]{prof_info}"
 
-        # ===== 防瞎编：把“今天的真实日程/打卡”作为事实喂给模型 =====
+        # ===== 防瞎编：把"今天的真实日程/打卡"作为事实喂给模型 =====
         # 模型之所以会编造日程，是因为它压根看不到你的数据。给了真实数据，它就没得编。
         if self.config.get("schedule_context_enabled", True):
             try:
@@ -1312,98 +1312,98 @@ class DesktopPet(QWidget):
         self.show_context_menu(QCursor.pos())
 
     def _build_context_menu(self):
-        “””构建右键菜单（只执行一次，QActions 的 parent 均设为 menu 自身避免泄漏）。”””
+        """构建右键菜单（只执行一次，QActions 的 parent 均设为 menu 自身避免泄漏）。"""
         menu = QMenu(self)
         menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
 
         # ---- 静态项 ----
-        menu.addAction(“🔌 登录为 Conveyor”,
+        menu.addAction("🔌 登录为 Conveyor",
                        lambda: self.open_dialog(UserProfileDialog))
-        menu.addAction(“📝 随手记 (便签/灵感)”,
+        menu.addAction("📝 随手记 (便签/灵感)",
                        lambda: self.open_dialog(QuickNoteDialog))
-        menu.addAction(“💖 查询好感度/当前心情”,
+        menu.addAction("💖 查询好感度/当前心情",
                        lambda: self.open_dialog(MoodDialog))
-        menu.addAction(“⏱️ 强制专注协议 (计时/防摸鱼监控)”,
+        menu.addAction("⏱️ 强制专注协议 (计时/防摸鱼监控)",
                        lambda: self.open_dialog(FocusDialog))
 
         # 专注模式动态项 —— 用空 action 占位，show 时更新
-        self._focus_stop_action = QAction(“”, menu)
+        self._focus_stop_action = QAction("", menu)
         self._focus_stop_action.setVisible(False)
         self._focus_stop_action.triggered.connect(self.stop_focus_manually)
-        self._focus_overlay_action = QAction(“”, menu)
+        self._focus_overlay_action = QAction("", menu)
         self._focus_overlay_action.setVisible(False)
         self._focus_overlay_action.triggered.connect(self.toggle_focus_overlay)
         menu.addAction(self._focus_stop_action)
         menu.addAction(self._focus_overlay_action)
 
-        menu.addAction(“📅 传达者日程系统 (提醒/待办)”,
+        menu.addAction("📅 传达者日程系统 (提醒/待办)",
                        lambda: self.open_dialog(ScheduleDialog))
 
-        cal_menu = QMenu(“📅 时序日历 (月历/打卡/统计)”, menu)
-        cal_menu.addAction(“🗓️ 迷你月历”,
+        cal_menu = QMenu("📅 时序日历 (月历/打卡/统计)", menu)
+        cal_menu.addAction("🗓️ 迷你月历",
                            lambda: self.open_dialog(MiniCalendarDialog))
-        cal_menu.addAction(“📌 每日打卡”,
+        cal_menu.addAction("📌 每日打卡",
                            lambda: self.open_dialog(CheckinDialog))
-        cal_menu.addAction(“📊 完成情况统计”,
+        cal_menu.addAction("📊 完成情况统计",
                            lambda: self.open_dialog(StatsDialog))
         cal_menu.addSeparator()
-        cal_menu.addAction(“💬 让 Gisa 说说今天的安排”,
+        cal_menu.addAction("💬 让 Gisa 说说今天的安排",
                            lambda: self.speak_today_plan())
         menu.addMenu(cal_menu)
 
-        menu.addAction(“📚 静默阅读舱 (书架/电子书)”,
+        menu.addAction("📚 静默阅读舱 (书架/电子书)",
                        lambda: self.open_dialog(EbookShelfDialog))
-        menu.addAction(“🛒 数据交换商城 (买资源/知识/调取记录)”,
+        menu.addAction("🛒 数据交换商城 (买资源/知识/调取记录)",
                        lambda: self.open_dialog(StoreDialog))
 
-        dice_menu = QMenu(“🎲 命运检定 (掷骰/塔罗)”, menu)
-        dice_menu.addAction(“🎲 基础检定 (d100)”, self.roll_dice_d100)
-        dice_menu.addAction(“🎭 骰娘延伸 (今日运势)”, self.roll_daily_luck)
-        dice_menu.addAction(“🃏 塔罗占卜 (单张抽取)”, self.draw_tarot)
+        dice_menu = QMenu("🎲 命运检定 (掷骰/塔罗)", menu)
+        dice_menu.addAction("🎲 基础检定 (d100)", self.roll_dice_d100)
+        dice_menu.addAction("🎭 骰娘延伸 (今日运势)", self.roll_daily_luck)
+        dice_menu.addAction("🃏 塔罗占卜 (单张抽取)", self.draw_tarot)
         menu.addMenu(dice_menu)
 
         menu.addSeparator()
-        menu.addAction(“🎨 气泡/文字/交互”,
+        menu.addAction("🎨 气泡/文字/交互",
                        lambda: self.open_dialog(AppearanceDialog))
-        menu.addAction(“⚙️ 自动化设置 (小剧场/闲聊)”,
+        menu.addAction("⚙️ 自动化设置 (小剧场/闲聊)",
                        lambda: self.open_dialog(AutoEventSettingsDialog))
-        menu.addAction(“📝 记忆档案 (历史监控与回溯)”,
+        menu.addAction("📝 记忆档案 (历史监控与回溯)",
                        lambda: self.open_dialog(HistoryDialog))
-        menu.addAction(“⚙️ 核心数据与接口 (人设/API)”,
+        menu.addAction("⚙️ 核心数据与接口 (人设/API)",
                        lambda: self.open_dialog(ApiSettingsDialog))
 
-        scale_menu = QMenu(“🔍 调整机体大小”, menu)
+        scale_menu = QMenu("🔍 调整机体大小", menu)
         for s in [150, 200, 300, 400]:
             scale_menu.addAction(
-                f”{s}x{s} px”,
+                f"{s}x{s} px",
                 lambda checked=False, size=s: self.change_scale(size))
         menu.addMenu(scale_menu)
 
-        menu.addAction(“📌 切换置顶状态”, self.toggle_top)
-        menu.addAction(“🔄 重置机体位置 (居中)”, self.reset_position)
-        menu.addAction(“🧹 关闭所有面板”, self.close_all_dialogs)
+        menu.addAction("📌 切换置顶状态", self.toggle_top)
+        menu.addAction("🔄 重置机体位置 (居中)", self.reset_position)
+        menu.addAction("🧹 关闭所有面板", self.close_all_dialogs)
         menu.addSeparator()
-        menu.addAction(“❌ 切断连接 (退出)”, QApplication.instance().quit)
+        menu.addAction("❌ 切断连接 (退出)", QApplication.instance().quit)
 
         return menu
 
     def show_context_menu(self, event):
         try:
-            if getattr(self, “_context_menu”, None) is None:
+            if getattr(self, "_context_menu", None) is None:
                 self._context_menu = self._build_context_menu()
             menu = self._context_menu
 
             # 专注模式动态项
             in_focus = self.is_focus_mode
-            self._focus_stop_action.setText(“🛑 提前终止/结算专注”)
+            self._focus_stop_action.setText("🛑 提前终止/结算专注")
             self._focus_stop_action.setVisible(in_focus)
-            self._focus_overlay_action.setText(“🕒 显示/隐藏专注悬浮窗”)
+            self._focus_overlay_action.setText("🕒 显示/隐藏专注悬浮窗")
             self._focus_overlay_action.setVisible(in_focus)
 
             menu.exec(QCursor.pos())
 
         except Exception as e:
-            self.show_bubble(f”【normal】视觉模块故障：{str(e)}。”)
+            self.show_bubble(f"【normal】视觉模块故障：{str(e)}。")
 
     def reset_position(self):
         screen_geo = QApplication.primaryScreen().availableGeometry()
