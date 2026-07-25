@@ -1311,127 +1311,99 @@ class DesktopPet(QWidget):
     def contextMenuEvent(self, event):
         self.show_context_menu(QCursor.pos())
 
+    def _build_context_menu(self):
+        “””构建右键菜单（只执行一次，QActions 的 parent 均设为 menu 自身避免泄漏）。”””
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+
+        # ---- 静态项 ----
+        menu.addAction(“🔌 登录为 Conveyor”,
+                       lambda: self.open_dialog(UserProfileDialog))
+        menu.addAction(“📝 随手记 (便签/灵感)”,
+                       lambda: self.open_dialog(QuickNoteDialog))
+        menu.addAction(“💖 查询好感度/当前心情”,
+                       lambda: self.open_dialog(MoodDialog))
+        menu.addAction(“⏱️ 强制专注协议 (计时/防摸鱼监控)”,
+                       lambda: self.open_dialog(FocusDialog))
+
+        # 专注模式动态项 —— 用空 action 占位，show 时更新
+        self._focus_stop_action = QAction(“”, menu)
+        self._focus_stop_action.setVisible(False)
+        self._focus_stop_action.triggered.connect(self.stop_focus_manually)
+        self._focus_overlay_action = QAction(“”, menu)
+        self._focus_overlay_action.setVisible(False)
+        self._focus_overlay_action.triggered.connect(self.toggle_focus_overlay)
+        menu.addAction(self._focus_stop_action)
+        menu.addAction(self._focus_overlay_action)
+
+        menu.addAction(“📅 传达者日程系统 (提醒/待办)”,
+                       lambda: self.open_dialog(ScheduleDialog))
+
+        cal_menu = QMenu(“📅 时序日历 (月历/打卡/统计)”, menu)
+        cal_menu.addAction(“🗓️ 迷你月历”,
+                           lambda: self.open_dialog(MiniCalendarDialog))
+        cal_menu.addAction(“📌 每日打卡”,
+                           lambda: self.open_dialog(CheckinDialog))
+        cal_menu.addAction(“📊 完成情况统计”,
+                           lambda: self.open_dialog(StatsDialog))
+        cal_menu.addSeparator()
+        cal_menu.addAction(“💬 让 Gisa 说说今天的安排”,
+                           lambda: self.speak_today_plan())
+        menu.addMenu(cal_menu)
+
+        menu.addAction(“📚 静默阅读舱 (书架/电子书)”,
+                       lambda: self.open_dialog(EbookShelfDialog))
+        menu.addAction(“🛒 数据交换商城 (买资源/知识/调取记录)”,
+                       lambda: self.open_dialog(StoreDialog))
+
+        dice_menu = QMenu(“🎲 命运检定 (掷骰/塔罗)”, menu)
+        dice_menu.addAction(“🎲 基础检定 (d100)”, self.roll_dice_d100)
+        dice_menu.addAction(“🎭 骰娘延伸 (今日运势)”, self.roll_daily_luck)
+        dice_menu.addAction(“🃏 塔罗占卜 (单张抽取)”, self.draw_tarot)
+        menu.addMenu(dice_menu)
+
+        menu.addSeparator()
+        menu.addAction(“🎨 气泡/文字/交互”,
+                       lambda: self.open_dialog(AppearanceDialog))
+        menu.addAction(“⚙️ 自动化设置 (小剧场/闲聊)”,
+                       lambda: self.open_dialog(AutoEventSettingsDialog))
+        menu.addAction(“📝 记忆档案 (历史监控与回溯)”,
+                       lambda: self.open_dialog(HistoryDialog))
+        menu.addAction(“⚙️ 核心数据与接口 (人设/API)”,
+                       lambda: self.open_dialog(ApiSettingsDialog))
+
+        scale_menu = QMenu(“🔍 调整机体大小”, menu)
+        for s in [150, 200, 300, 400]:
+            scale_menu.addAction(
+                f”{s}x{s} px”,
+                lambda checked=False, size=s: self.change_scale(size))
+        menu.addMenu(scale_menu)
+
+        menu.addAction(“📌 切换置顶状态”, self.toggle_top)
+        menu.addAction(“🔄 重置机体位置 (居中)”, self.reset_position)
+        menu.addAction(“🧹 关闭所有面板”, self.close_all_dialogs)
+        menu.addSeparator()
+        menu.addAction(“❌ 切断连接 (退出)”, QApplication.instance().quit)
+
+        return menu
+
     def show_context_menu(self, event):
         try:
-            self.context_menu = QMenu(self) # 给菜单绑定持久父类，防止回收闪退
-            menu = self.context_menu
-            
-            action_profile = QAction("🔌 登录为 Conveyor", self)
-            action_profile.triggered.connect(lambda checked=False: self.open_dialog(UserProfileDialog))
-            
-            action_auto_settings = QAction("⚙️ 自动化设置 (小剧场/闲聊)", self)
-            action_auto_settings.triggered.connect(lambda checked=False: self.open_dialog(AutoEventSettingsDialog))
-            
-            action_notes = QAction("📝 随手记 (便签/灵感)", self)
-            action_notes.triggered.connect(lambda checked=False: self.open_dialog(QuickNoteDialog))
-            
-            action_mood = QAction("💖 查询好感度/当前心情", self)
-            action_mood.triggered.connect(lambda checked=False: self.open_dialog(MoodDialog))
-            
-            action_focus = QAction("⏱️ 强制专注协议 (计时/防摸鱼监控)", self)
-            action_focus.triggered.connect(lambda checked=False: self.open_dialog(FocusDialog))
-            
-            action_schedule = QAction("📅 传达者日程系统 (提醒/待办)", self)
-            action_schedule.triggered.connect(lambda checked=False: self.open_dialog(ScheduleDialog))
+            if getattr(self, “_context_menu”, None) is None:
+                self._context_menu = self._build_context_menu()
+            menu = self._context_menu
 
-            action_ebook = QAction("📚 静默阅读舱 (书架/电子书)", self)
-            action_ebook.triggered.connect(lambda checked=False: self.open_dialog(EbookShelfDialog))
+            # 专注模式动态项
+            in_focus = self.is_focus_mode
+            self._focus_stop_action.setText(“🛑 提前终止/结算专注”)
+            self._focus_stop_action.setVisible(in_focus)
+            self._focus_overlay_action.setText(“🕒 显示/隐藏专注悬浮窗”)
+            self._focus_overlay_action.setVisible(in_focus)
 
-            # ===== 📅 新增：日历模块 =====
-            cal_menu = QMenu("📅 时序日历 (月历/打卡/统计)", menu)
-            action_cal = QAction("🗓️ 迷你月历", self)
-            action_cal.triggered.connect(lambda checked=False: self.open_dialog(MiniCalendarDialog))
-            action_checkin = QAction("📌 每日打卡", self)
-            action_checkin.triggered.connect(lambda checked=False: self.open_dialog(CheckinDialog))
-            action_stats = QAction("📊 完成情况统计", self)
-            action_stats.triggered.connect(lambda checked=False: self.open_dialog(StatsDialog))
-            action_speak_plan = QAction("💬 让 Gisa 说说今天的安排", self)
-            action_speak_plan.triggered.connect(lambda checked=False: self.speak_today_plan())
-            cal_menu.addAction(action_cal)
-            cal_menu.addAction(action_checkin)
-            cal_menu.addAction(action_stats)
-            cal_menu.addSeparator()
-            cal_menu.addAction(action_speak_plan)
-            
-            action_store = QAction("🛒 数据交换商城 (买资源/知识/调取记录)", self)
-            action_store.triggered.connect(lambda checked=False: self.open_dialog(StoreDialog))
-            
-            dice_menu = QMenu("🎲 命运检定 (掷骰/塔罗)", menu)
-            action_d100 = QAction("🎲 基础检定 (d100)", self)
-            action_d100.triggered.connect(self.roll_dice_d100)
-            
-            action_luck = QAction("🎭 骰娘延伸 (今日运势)", self)
-            action_luck.triggered.connect(self.roll_daily_luck)
-            
-            action_tarot = QAction("🃏 塔罗占卜 (单张抽取)", self)
-            action_tarot.triggered.connect(self.draw_tarot)
-            
-            dice_menu.addAction(action_d100)
-            dice_menu.addAction(action_luck)
-            dice_menu.addAction(action_tarot)
-            
-            action_api = QAction("⚙️ 核心数据与接口 (人设/API)", self)
-            action_api.triggered.connect(lambda checked=False: self.open_dialog(ApiSettingsDialog))
-            
-            action_appearance = QAction("🎨 气泡/文字/交互", self)
-            action_appearance.triggered.connect(lambda checked=False: self.open_dialog(AppearanceDialog))
-            
-            action_history = QAction("📝 记忆档案 (历史监控与回溯)", self)
-            action_history.triggered.connect(lambda checked=False: self.open_dialog(HistoryDialog))
-            
-            scale_menu = QMenu("🔍 调整机体大小", menu)
-            for s in [150, 200, 300, 400]:
-                act = QAction(f"{s}x{s} px", self)
-                act.triggered.connect(lambda checked=False, size=s: self.change_scale(size))
-                scale_menu.addAction(act)
-
-            action_top = QAction("📌 切换置顶状态", self)
-            action_top.triggered.connect(self.toggle_top)
-            
-            action_reset = QAction("🔄 重置机体位置 (居中)", self)
-            action_reset.triggered.connect(self.reset_position)
-
-            action_close_panels = QAction("🧹 关闭所有面板", self)
-            action_close_panels.triggered.connect(self.close_all_dialogs)
-            
-            action_quit = QAction("❌ 切断连接 (退出)", self)
-            action_quit.triggered.connect(QApplication.instance().quit)
-            
-            menu.addAction(action_profile)
-            menu.addAction(action_notes)
-            menu.addAction(action_mood)
-            menu.addAction(action_focus)
-            
-            if self.is_focus_mode:
-                action_stop_focus = QAction("🛑 提前终止/结算专注", self)
-                action_stop_focus.triggered.connect(self.stop_focus_manually)
-                menu.addAction(action_stop_focus)
-                
-                action_toggle_overlay = QAction("🕒 显示/隐藏专注悬浮窗", self)
-                action_toggle_overlay.triggered.connect(self.toggle_focus_overlay)
-                menu.addAction(action_toggle_overlay)
-                
-            menu.addAction(action_schedule)
-            menu.addMenu(cal_menu)
-            menu.addAction(action_ebook)
-            menu.addAction(action_store)
-            menu.addMenu(dice_menu)
-            menu.addSeparator()
-            menu.addAction(action_appearance)      # 🎨 气泡/文字/交互
-            menu.addAction(action_auto_settings)   # ⚙️ 自动化设置(按要求：放在“气泡/文字/交互”下方)
-            menu.addAction(action_history)         # 📝 记忆档案(按要求：放在“核心数据与接口”上方)
-            menu.addAction(action_api)             # ⚙️ 核心数据与接口
-            menu.addMenu(scale_menu)
-            menu.addAction(action_top)
-            menu.addAction(action_reset)
-            menu.addAction(action_close_panels)
-            menu.addSeparator()
-            menu.addAction(action_quit)
-            
             menu.exec(QCursor.pos())
-            
+
         except Exception as e:
-            self.show_bubble(f"【normal】视觉模块故障：{str(e)}。")
+            self.show_bubble(f”【normal】视觉模块故障：{str(e)}。”)
 
     def reset_position(self):
         screen_geo = QApplication.primaryScreen().availableGeometry()
