@@ -597,13 +597,13 @@ class ScheduleDialog(QDialog):
 
 class DayDetailDialog(QDialog):
     """点击日历格子后弹出的迷你详情窗：显示当天的日程与打卡，可直接勾选/编辑/新增"""
-    def __init__(self, parent_pet, the_date):
-        super().__init__(parent_pet)
-        self.pet = parent_pet
+    def __init__(self, parent, the_date):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.pet = parent.pet if hasattr(parent, "pet") else parent
         self.the_date = the_date
         self.setWindowTitle(the_date.strftime("%Y年%m月%d日"))
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setMinimumSize(360, 420)
         self.resize(400, 480)
         lay = QVBoxLayout(self)
@@ -951,7 +951,7 @@ class MiniCalendarDialog(QDialog):
         self.refresh_list()
 
     def open_detail(self):
-        dlg = DayDetailDialog(self.pet, self.sel_date)
+        dlg = DayDetailDialog(self, self.sel_date)
         dlg.move(self.x() + self.width() + 10, self.y())
         dlg.show()
         self._detail = dlg
