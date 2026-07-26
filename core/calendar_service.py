@@ -95,7 +95,7 @@ class CalendarService(QObject):
 
     # ===================== 写方法 — 日程 =====================
 
-    def add_schedule(self, data: dict) -> str:
+    def add_schedule(self, data: dict) -> int:
         sid = new_id()
         data["id"] = sid
         data.setdefault("status", "pending")
@@ -108,7 +108,7 @@ class CalendarService(QObject):
         data.setdefault("category", data.get("category", "日待办"))
         self.config.setdefault("schedules", []).append(data)
         self._save()
-        self.schedule_added.emit(sid)
+        self.schedule_added.emit(str(sid))
         self.schedules_changed.emit()
         return sid
 
@@ -116,17 +116,18 @@ class CalendarService(QObject):
         sched.update(data)
         sched["notified"] = False  # 改过时间后今天可重新提醒
         self._save()
-        self.schedule_updated.emit(sched.get("id", ""))
+        self.schedule_updated.emit(str(sched.get("id")))
         self.schedules_changed.emit()
 
-    def delete_schedule(self, sched_id: str):
+    def delete_schedule(self, sched_id):
+        sched_id = int(sched_id)
         lst = self.config.get("schedules", [])
         for i, s in enumerate(lst):
             if s.get("id") == sched_id:
                 del lst[i]
                 break
         self._save()
-        self.schedule_removed.emit(sched_id)
+        self.schedule_removed.emit(str(sched_id))
         self.schedules_changed.emit()
 
     def mark_schedule_done(self, sched: dict, d=None, done=True) -> bool:
@@ -148,14 +149,14 @@ class CalendarService(QObject):
             self.config["coins"] = max(0, self.config.get("coins", 0) - 20)
             self._save()
             self.coins_changed.emit(self.config["coins"])
-        self.schedule_updated.emit(sched.get("id", ""))
+        self.schedule_updated.emit(str(sched.get("id")))
         self.schedules_changed.emit()
         self._check_milestones()
         return True
 
     # ===================== 写方法 — 打卡 =====================
 
-    def add_checkin(self, data: dict) -> str:
+    def add_checkin(self, data: dict) -> int:
         cid = new_id()
         data["id"] = cid
         data.setdefault("created", date.today().strftime("%Y-%m-%d"))
@@ -164,24 +165,25 @@ class CalendarService(QObject):
         data.setdefault("enabled", True)
         self.config.setdefault("checkins", []).append(data)
         self._save()
-        self.checkin_added.emit(cid)
+        self.checkin_added.emit(str(cid))
         self.checkins_changed.emit()
         return cid
 
     def update_checkin(self, item: dict, data: dict):
         item.update(data)
         self._save()
-        self.checkin_updated.emit(item.get("id", ""))
+        self.checkin_updated.emit(str(item.get("id")))
         self.checkins_changed.emit()
 
-    def delete_checkin(self, item_id: str):
+    def delete_checkin(self, item_id):
+        item_id = int(item_id)
         lst = self.config.get("checkins", [])
         for i, c in enumerate(lst):
             if c.get("id") == item_id:
                 del lst[i]
                 break
         self._save()
-        self.checkin_removed.emit(item_id)
+        self.checkin_removed.emit(str(item_id))
         self.checkins_changed.emit()
 
     def do_checkin(self, item: dict, d=None, done=True, quiet=False) -> bool:
@@ -197,7 +199,7 @@ class CalendarService(QObject):
             self.config["coins"] = max(0, self.config.get("coins", 0) - 5)
         self._save()
         self.coins_changed.emit(self.config["coins"])
-        self.checkin_updated.emit(item.get("id", ""))
+        self.checkin_updated.emit(str(item.get("id")))
         self.checkins_changed.emit()
 
         if done and d == date.today() and not quiet:
