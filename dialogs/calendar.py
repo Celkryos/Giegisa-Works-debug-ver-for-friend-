@@ -441,7 +441,7 @@ class ScheduleDialog(CalendarDialog):
         for slot, obj in zip(slots, ordered):
             schedules[slot] = obj
         save_config(self.service.config)
-        self.refresh_list()
+        self.service.schedules_changed.emit()   # 通知其他已打开面板刷新
 
     def refresh_list(self):
         curr_cat = self.cat_combo.currentText()
