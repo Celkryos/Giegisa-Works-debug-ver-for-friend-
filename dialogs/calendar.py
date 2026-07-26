@@ -534,8 +534,7 @@ class ScheduleDialog(QDialog):
 
     def edit_task(self, sched):
         dlg = EditScheduleDialog(self, sched=sched)
-        dlg.exec()
-        self.refresh_list()
+        dlg.show()
 
     def mark_done(self, sched, done=True):
         self.pet.mark_schedule_done(sched, date.today(), done)
@@ -569,8 +568,7 @@ class ScheduleDialog(QDialog):
 
     def add_detailed(self):
         dlg = EditScheduleDialog(self, default_category=self.cat_combo.currentText())
-        dlg.exec()
-        self.refresh_list()
+        dlg.show()
 
     def add_schedule(self):
         task = self.task_input.text().strip()
@@ -603,7 +601,7 @@ class DayDetailDialog(QDialog):
         self.pet = parent.pet if hasattr(parent, "pet") else parent
         self.the_date = the_date
         self.setWindowTitle(the_date.strftime("%Y年%m月%d日"))
-        self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.WindowType.Tool)
         self.setMinimumSize(360, 420)
         self.resize(400, 480)
         lay = QVBoxLayout(self)
@@ -688,12 +686,10 @@ class DayDetailDialog(QDialog):
         self.refresh_list()
 
     def edit(self, sched):
-        EditScheduleDialog(self, sched=sched).exec()
-        self.refresh_list()
+        EditScheduleDialog(self, sched=sched).show()
 
     def add_here(self):
-        EditScheduleDialog(self, default_date=self.the_date).exec()
-        self.refresh_list()
+        EditScheduleDialog(self, default_date=self.the_date).show()
 
     def speak(self):
         self.pet.speak_today_plan(self.the_date)
@@ -711,7 +707,7 @@ class MiniCalendarDialog(QDialog):
         super().__init__(parent_pet)
         self.pet = parent_pet
         self.setWindowTitle("📅 日历")
-        self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.sel_date = date.today()
         self.view_year = self.sel_date.year
@@ -947,8 +943,7 @@ class MiniCalendarDialog(QDialog):
             self.pet.speak_today_plan(d)
 
     def add_on_selected(self):
-        EditScheduleDialog(self, default_date=self.sel_date).exec()
-        self.refresh_list()
+        EditScheduleDialog(self, default_date=self.sel_date).show()
 
     def open_detail(self):
         dlg = DayDetailDialog(self, self.sel_date)
@@ -1065,12 +1060,10 @@ class CheckinDialog(QDialog):
         self.refresh_list()
 
     def add_item(self):
-        EditCheckinDialog(self).exec()
-        self.refresh_list()
+        EditCheckinDialog(self).show()
 
     def edit(self, item):
-        EditCheckinDialog(self, item=item).exec()
-        self.refresh_list()
+        EditCheckinDialog(self, item=item).show()
 
     def toggle_archive(self, item):
         item["archived"] = not item.get("archived", False)

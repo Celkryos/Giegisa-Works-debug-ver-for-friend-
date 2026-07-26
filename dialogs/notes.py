@@ -36,7 +36,7 @@ class QuickNoteDialog(QDialog):
         super().__init__(parent_pet)
         self.pet = parent_pet
         self.setWindowTitle("📝 随手记 (便签)")
-        self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.WindowType.Tool)
         self.setWindowOpacity(0.92) 
         self.resize(300, 160)
         self.layout = QVBoxLayout(self)
