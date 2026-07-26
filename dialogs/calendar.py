@@ -138,7 +138,7 @@ class CheckinAlertDialog(QDialog):
         self.accept()
         QTimer.singleShot(
             0, lambda pet=self.pet, item=self.item:
-            pet.do_checkin(item, date.today(), True))
+            pet.calendar_service.do_checkin(item, date.today(), True))
 
 class EditScheduleDialog(QDialog):
     """

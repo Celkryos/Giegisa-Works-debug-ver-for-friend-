@@ -1559,7 +1559,7 @@ class EbookReaderDialog(QDialog):
                     "done_dates": []}
                 checkins.append(item)
             if not checkin_done_on(item, date.today()):
-                self.pet.do_checkin(item, date.today(), True, quiet=True)
+                self.pet.calendar_service.do_checkin(item, date.today(), True, quiet=True)
                 awarded = True
         else:
             self.pet.config["coins"] = int(self.pet.config.get("coins", 0)) + 5
