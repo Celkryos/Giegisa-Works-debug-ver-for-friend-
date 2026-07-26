@@ -18,6 +18,7 @@ from PyQt6.QtGui import QPixmap, QColor, QAction, QCursor, QIcon, QImage
 
 from config import (BASE_DIR, PIC_DIR, UI_BACKGROUND_FILE, CONFIG_FILE, HISTORY_FILE, NOTES_FILE, DEFAULT_CONFIG, LOAD_WARNINGS, safe_json_save, _atomic_write_json, _read_json, load_config, save_config, flush_config_if_dirty)
 from core.utils import *
+from core.calendar_service import CalendarService
 from api import gemini_rest_generate, openai_chat
 from threads import ChatThread, TriviaThread, IdleChatThread, RandomEventThread, DataRetrievalThread, ItemRetrievalThread, ImageFetchThread
 from ui import MENU_QSS, ImageBubble, ResponsiveListWidget, DraggableListWidget, ChatInputBox, FocusOverlay, InputDialog, install_ice_glass_theme
@@ -102,6 +103,16 @@ class DesktopPet(QWidget):
 
         self.init_images()
         self.init_ui()
+
+        # ===== CalendarService: 日程/打卡业务逻辑层 =====
+        self.calendar_service = CalendarService(self.config)
+
+        # 连接 UI 反馈信号
+        self.calendar_service.bubble_needed.connect(self.show_bubble)
+        self.calendar_service.ai_speech_needed.connect(self.inject_system_event)
+        self.calendar_service.coins_changed.connect(self._on_calendar_coins_changed)
+        self.calendar_service.milestone_reached.connect(self._on_calendar_milestone)
+
         self.init_timers()
 
         self.chat_thread = ChatThread(self.config)
@@ -209,119 +220,12 @@ class DesktopPet(QWidget):
     # ==========================================
     # 📅 日程 / 打卡 / 统计 的核心逻辑
     # ==========================================
-    def mark_schedule_done(self, sched, d=None, done=True):
-        d = d or date.today()
-        if not sched_set_done(sched, d, done):
-            save_config(self.config)
-            return
-        st = self.config.setdefault("stats", {})
-        if done:
-            st["todo_done_total"] = st.get("todo_done_total", 0) + 1
-            self.config["coins"] = self.config.get("coins", 0) + 20
-            save_config(self.config)
-            self.inject_system_event(
-                f"系统：用户完成了待办事项 [{sched.get('task','')}]",
-                f"【normal】计划执行得不错。 [{sched.get('task','')}] 已经从待办里划掉了。这是给你的20数据碎片。")
-            self.check_milestones()
-        else:
-            st["todo_done_total"] = max(0, st.get("todo_done_total", 0) - 1)
-            self.config["coins"] = max(0, self.config.get("coins", 0) - 20)
-            save_config(self.config)
-        self.refresh_dialogs("dlg_ScheduleDialog", "dlg_MiniCalendarDialog", "dlg_StatsDialog")
-
-    def do_checkin(self, item, d=None, done=True, quiet=False):
-        d = d or date.today()
-        if not checkin_set_done(item, d, done):
-            return
-        st = self.config.setdefault("stats", {})
-        if done:
-            st["checkin_done_total"] = st.get("checkin_done_total", 0) + 1
-            self.config["coins"] = self.config.get("coins", 0) + 5
-        else:
-            st["checkin_done_total"] = max(0, st.get("checkin_done_total", 0) - 1)
-            self.config["coins"] = max(0, self.config.get("coins", 0) - 5)
-        save_config(self.config)
-
-        if done and d == date.today() and not quiet:
-            self.check_checkin_bonus()
-        if not quiet:
-            self.check_milestones()
-        self.refresh_dialogs("dlg_CheckinDialog", "dlg_MiniCalendarDialog", "dlg_StatsDialog")
-
-    def check_checkin_bonus(self):
-        """今天所有启用中的打卡都完成了 → 发一次额外奖励（每天只发一次）"""
-        today = date.today()
-        acts = [c for c in active_checkins(self.config) if c.get("enabled", True)]
-        if not acts:
-            return
-        if not all(checkin_done_on(c, today) for c in acts):
-            return
-        if self.config.get("checkin_last_bonus_date") == today.strftime("%Y-%m-%d"):
-            return
-        bonus = random.randint(30, 60)
-        self.config["checkin_last_bonus_date"] = today.strftime("%Y-%m-%d")
-        self.config["coins"] = self.config.get("coins", 0) + bonus
-        save_config(self.config)
-        self.change_mood(5)
-        self.inject_system_event(
-            f"系统：用户今日打卡全部完成，获得{bonus}数据碎片全勤奖励",
-            f"【shy】……今天的{len(acts)}项打卡一个没落。哼，算你有点自律。"
-            f"额外奖励 <font color='#FFD700'>{bonus} 数据碎片</font>，拿好。")
-
-    MILESTONES = [10, 30, 50, 100, 200, 300, 500, 800, 1000, 1500, 2000, 3000, 5000]
-
-    def check_milestones(self):
-        """累计完成量跨过里程碑时，让 Giegisa 说句话并给随机碎片奖励"""
-        st = self.config.setdefault("stats", {})
-        for key, reached_key, label in (("todo_done_total", "milestone_todo", "待办"),
-                                        ("checkin_done_total", "milestone_checkin", "打卡")):
-            total = st.get(key, 0)
-            reached = st.get(reached_key, 0)
-            new_mark = None
-            for m in self.MILESTONES:
-                if total >= m > reached:
-                    new_mark = m
-            if new_mark is None:
-                continue
-            st[reached_key] = new_mark
-            reward = random.randint(50, 150)
-            self.config["coins"] = self.config.get("coins", 0) + reward
-            save_config(self.config)
-            self.change_mood(8)
-            self.inject_system_event(
-                f"系统：用户累计完成{label}达到{new_mark}次，获得{reward}数据碎片里程碑奖励",
-                f"【dark】统计模块提示：你累计完成的{label}已经到了 "
-                f"<font color='#4169E1'>{new_mark}</font> 次。"
-                f"坚持这种事本身就比结果稀有。奖励 <font color='#FFD700'>{reward} 数据碎片</font>。")
-
-    def build_plan_text(self, d=None, for_ai=True):
-        """
-        把某一天的真实日程/打卡拼成一段文字。
-        这是"防瞎编"的关键：直接把真实数据喂给模型，它就没有编造的空间了。
-        """
-        d = d or date.today()
-        items = schedules_of_day(self.config, d)
-        lines = []
-        for s in items:
-            flag = "已完成" if sched_done_on(s, d) else "未完成"
-            note = f"（备注：{s.get('note','')[:40]}）" if s.get("note") else ""
-            lines.append(f"{s.get('time','--:--')} {s.get('task','')}[{flag}]{note}")
-        checks = []
-        if d == date.today():
-            for c in active_checkins(self.config):
-                checks.append(f"{c.get('name','')}[{'已打卡' if checkin_done_on(c, d) else '未打卡'}]")
-        parts = [f"日期：{d.strftime('%Y年%m月%d日')}"]
-        parts.append("日程：" + ("；".join(lines) if lines else "无"))
-        if checks:
-            parts.append("今日打卡：" + "；".join(checks))
-        return "　".join(parts)
-
     def speak_today_plan(self, d=None):
         """让 Giegisa 基于真实数据说说这一天的安排"""
         d = d or date.today()
-        data = self.build_plan_text(d)
-        items = schedules_of_day(self.config, d)
-        if not items and not (d == date.today() and active_checkins(self.config)):
+        data = self.calendar_service.build_plan_text(d)
+        items = self.calendar_service.get_schedules_of_day(d)
+        if not items and not (d == date.today() and self.calendar_service.get_active_checkins()):
             self.inject_system_event(
                 f"系统：用户查看了 {d.strftime('%m月%d日')} 的安排，当天没有任何日程",
                 f"【normal】{d.strftime('%m月%d日')}。你什么都没安排。是打算放空，还是单纯忘了记？")
@@ -331,19 +235,19 @@ class DesktopPet(QWidget):
             f"绝对不许添加、删减或编造任何条目。用你的口吻简短复述并给一句评价（60字以内）。\n{data}】",
             hidden=True)
 
-    def daily_rollover(self):
-        """
-        跨天处理（每天 0 点自动触发一次）：
-        - 把所有日程的"今天提醒过了"标记清零，这样每天到点都会重新提醒
-        - 刷新已经打开的日历/打卡面板
-        """
-        for s in self.config.get("schedules", []):
-            if isinstance(s, dict) and s.get("notified"):
-                s["notified"] = False
-        self._checkin_notified = set()
-        save_config(self.config)
-        self.refresh_dialogs("dlg_MiniCalendarDialog", "dlg_CheckinDialog",
-                             "dlg_StatsDialog", "dlg_ScheduleDialog")
+    def _on_calendar_coins_changed(self, amount):
+        """CalendarService 通知金币变更，更新已打开的商城面板"""
+        dlg = getattr(self, "dlg_StoreDialog", None)
+        if dlg is not None and dlg.isVisible():
+            try:
+                dlg.coin_label.setText(
+                    f"<h2>💰 当前资产：{amount} 数据碎片</h2>")
+            except RuntimeError:
+                self.dlg_StoreDialog = None
+
+    def _on_calendar_milestone(self, label, count):
+        """CalendarService 通知里程碑达成，改变心情"""
+        self.change_mood(8)
 
     def check_clipboard(self):
         if not self.config.get("clipboard_enabled", True): return
@@ -651,7 +555,8 @@ class DesktopPet(QWidget):
         today = now.date()
         if getattr(self, "_last_seen_date", None) != today:
             if getattr(self, "_last_seen_date", None) is not None:
-                self.daily_rollover()
+                self.calendar_service.daily_rollover()
+                self._checkin_notified = set()
             self._last_seen_date = today
 
         now_str = now.strftime("%H:%M")
@@ -683,7 +588,7 @@ class DesktopPet(QWidget):
         if self.config.get("checkin_reminder_enabled", True):
             if not hasattr(self, "_checkin_notified"):
                 self._checkin_notified = set()
-            for c in active_checkins(self.config):
+            for c in self.calendar_service.get_active_checkins():
                 if not c.get("enabled", True):
                     continue
                 if now_str not in (c.get("remind_times") or []):
@@ -1056,7 +961,7 @@ class DesktopPet(QWidget):
         # 模型之所以会编造日程，是因为它压根看不到你的数据。给了真实数据，它就没得编。
         if self.config.get("schedule_context_enabled", True):
             try:
-                snapshot = self.build_plan_text()
+                snapshot = self.calendar_service.build_plan_text()
                 mood_prompt += ("\n[事实数据·当前时间与用户日程（这是唯一可信来源，"
                                 "回答任何与日程/待办/打卡相关的问题时必须以此为准，"
                                 "此处没有的就是没有，绝对不许编造）："
@@ -1260,8 +1165,19 @@ class DesktopPet(QWidget):
     def open_dialog(self, DialogClass, *args):
         suffix = "_" + str(args[0]) if args and isinstance(args[0], str) else ""
         dlg_name = f"dlg_{DialogClass.__name__}{suffix}"
+
+        # 判断是否需要注入 CalendarService
+        _CALENDAR_DIALOGS = (
+            "ScheduleDialog", "MiniCalendarDialog", "CheckinDialog",
+            "StatsDialog", "DayDetailDialog", "EditScheduleDialog",
+            "EditCheckinDialog")
+        needs_service = DialogClass.__name__ in _CALENDAR_DIALOGS
+
         if not hasattr(self, dlg_name) or getattr(self, dlg_name) is None:
-            new_dlg = DialogClass(self, *args)
+            if needs_service:
+                new_dlg = DialogClass(self.calendar_service, self, *args)
+            else:
+                new_dlg = DialogClass(self, *args)
             setattr(self, dlg_name, new_dlg)
             new_dlg.show()
         else:
@@ -1274,7 +1190,10 @@ class DesktopPet(QWidget):
                 dlg.activateWindow()
                 dlg.raise_()
             except RuntimeError:
-                new_dlg = DialogClass(self, *args)
+                if needs_service:
+                    new_dlg = DialogClass(self.calendar_service, self, *args)
+                else:
+                    new_dlg = DialogClass(self, *args)
                 setattr(self, dlg_name, new_dlg)
                 new_dlg.show()
 
