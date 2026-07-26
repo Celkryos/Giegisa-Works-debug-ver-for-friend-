@@ -340,10 +340,9 @@ class EditCheckinDialog(QDialog):
                 save_config(pet.config),
                 pet.refresh_dialogs("dlg_CheckinDialog", "dlg_MiniCalendarDialog", "dlg_StatsDialog")))
 
-class ScheduleDialog(QDialog):
-    def __init__(self, parent_pet):
-        super().__init__(parent_pet)
-        self.pet = parent_pet
+class ScheduleDialog(CalendarDialog):
+    def __init__(self, service, parent=None):
+        super().__init__(service, parent)
         self.setWindowTitle("Giegisa - 传达者日程系统")
         self.setMinimumSize(430, 500)
         self.resize(640, 600)
@@ -437,7 +436,7 @@ class ScheduleDialog(QDialog):
 
     def reorder_schedules(self, new_ids):
         """拖拽排序：只调整“当前可见的这一批”在总表里的先后顺序，其它条目原地不动。"""
-        schedules = self.pet.config.get("schedules", [])
+        schedules = self.service.config.get("schedules", [])
         curr_cat = self.cat_combo.currentText()
 
         # 用 id 定位，而不是用 dict 的值比较（值比较在内容相同时会认错条目）
@@ -453,7 +452,7 @@ class ScheduleDialog(QDialog):
         slots = [i for i, s in enumerate(schedules) if s.get("id") in visible_ids]
         for slot, obj in zip(slots, ordered):
             schedules[slot] = obj
-        save_config(self.pet.config)
+        save_config(self.service.config)
         self.refresh_list()
 
     def refresh_list(self):
@@ -464,7 +463,7 @@ class ScheduleDialog(QDialog):
         
         visible_scheds = []
         hidden_scheds = []
-        for sched in self.pet.config.get("schedules", []):
+        for sched in self.service.config.get("schedules", []):
             if not isinstance(sched, dict):
                 continue
             if sched.get("category", "日待办") != curr_cat:
@@ -600,43 +599,27 @@ class ScheduleDialog(QDialog):
             target_widget.setItemWidget(item, item_widget)
 
     def toggle_alarm(self, sched):
-        sched["alarm_on"] = not sched.get("alarm_on", True)
-        save_config(self.pet.config)
-        self.refresh_list()
+        self.service.update_schedule(sched, {"alarm_on": not sched.get("alarm_on", True)})
 
     def edit_task(self, sched):
         dlg = EditScheduleDialog(self, sched=sched)
         dlg.show()
 
     def mark_done(self, sched, done=True):
-        self.pet.mark_schedule_done(sched, date.today(), done)
-        self.refresh_list()
+        self.service.mark_schedule_done(sched, date.today(), done)
 
     def hide_task(self, sched):
-        sched["status"] = "hidden"
-        save_config(self.pet.config)
-        self.refresh_list()
+        self.service.update_schedule(sched, {"status": "hidden"})
 
     def restore_task(self, sched):
-        sched["status"] = "pending"
-        save_config(self.pet.config)
-        self.refresh_list()
+        self.service.update_schedule(sched, {"status": "pending"})
 
     def del_task(self, sched):
         if QMessageBox.question(self, "确认删除", f"确定删除「{sched.get('task','')}」吗？",
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                                 ) != QMessageBox.StandardButton.Yes:
             return
-        # 按 id 精确删除，避免内容相同时删错条目
-        sid = sched.get("id")
-        lst = self.pet.config.get("schedules", [])
-        for i, s in enumerate(lst):
-            if s.get("id") == sid:
-                del lst[i]
-                break
-        save_config(self.pet.config)
-        self.pet.refresh_dialogs("dlg_MiniCalendarDialog", "dlg_StatsDialog")
-        self.refresh_list()
+        self.service.delete_schedule(sched.get("id"))
 
     def add_detailed(self):
         dlg = EditScheduleDialog(self, default_category=self.cat_combo.currentText())
@@ -646,24 +629,14 @@ class ScheduleDialog(QDialog):
         task = self.task_input.text().strip()
         if not task:
             return
-        self.pet.config.setdefault("schedules", []).append({
-            "id": new_id(),
+        self.service.add_schedule({
             "category": self.cat_combo.currentText(),
             "time": self.time_edit.time().toString("HH:mm"),
             "task": task,
             "note": "",
-            "date": "",          # 快速添加默认不绑定日期
-            "repeat": "once",
-            "repeat_days": 1,
-            "done_dates": [],
-            "notified": False,
-            "status": "pending",
-            "alarm_on": True
+            "date": "",
         })
-        save_config(self.pet.config)
         self.task_input.clear()
-        self.pet.refresh_dialogs("dlg_MiniCalendarDialog", "dlg_StatsDialog")
-        self.refresh_list()
 
 class DayDetailDialog(QDialog):
     """点击日历格子后弹出的迷你详情窗：显示当天的日程与打卡，可直接勾选/编辑/新增"""
@@ -766,7 +739,7 @@ class DayDetailDialog(QDialog):
     def speak(self):
         self.pet.speak_today_plan(self.the_date)
 
-class MiniCalendarDialog(QDialog):
+class MiniCalendarDialog(CalendarDialog):
     """
     📅 迷你月历（约 200px 宽）。
     - 有日程的日子会用不同底色标出：蓝=还有没做完的，绿=当天的都完成了
@@ -775,9 +748,8 @@ class MiniCalendarDialog(QDialog):
     """
     CELL = 26
 
-    def __init__(self, parent_pet):
-        super().__init__(parent_pet)
-        self.pet = parent_pet
+    def __init__(self, service, parent=None):
+        super().__init__(service, parent)
         self.setWindowTitle("📅 日历")
         self.setWindowFlags(Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -828,7 +800,7 @@ class MiniCalendarDialog(QDialog):
         # ---- 中间：7x6 日期格 ----
         self.grid = QGridLayout()
         self.grid.setSpacing(2)
-        week_start = int(self.pet.config.get("calendar_week_start", 0) or 0)
+        week_start = int(self.service.config.get("calendar_week_start", 0) or 0)
         names = ["一", "二", "三", "四", "五", "六", "日"] if week_start == 0 else \
                 ["日", "一", "二", "三", "四", "五", "六"]
         for c, n in enumerate(names):
@@ -880,14 +852,14 @@ class MiniCalendarDialog(QDialog):
     # -------- 数据 --------
     def _day_state(self, d):
         """返回 (日程总数, 已完成数)"""
-        items = schedules_of_day(self.pet.config, d)
+        items = self.service.get_schedules_of_day(d)
         if not items:
             return 0, 0
         return len(items), sum(1 for s in items if sched_done_on(s, d))
 
     def refresh_list(self):
         self.head_label.setText(f"{self.view_year}年 {self.view_month}月")
-        week_start = int(self.pet.config.get("calendar_week_start", 0) or 0)
+        week_start = int(self.service.config.get("calendar_week_start", 0) or 0)
         cal = _pycalendar.Calendar(firstweekday=0 if week_start == 0 else 6)
         weeks = cal.monthdatescalendar(self.view_year, self.view_month)
         today = date.today()
@@ -933,11 +905,11 @@ class MiniCalendarDialog(QDialog):
     def refresh_day_panel(self):
         d = self.sel_date
         self.day_list.clear()
-        items = schedules_of_day(self.pet.config, d)
+        items = self.service.get_schedules_of_day(d)
         total, done = len(items), sum(1 for s in items if sched_done_on(s, d))
         self.day_title.setText(f"📋 {d.strftime('%m月%d日')} · {done}/{total} 完成")
 
-        checks = active_checkins(self.pet.config) if d == date.today() else []
+        checks = self.service.get_active_checkins() if d == date.today() else []
         if not items and not checks:
             self.day_list.addItem("📭 这天没有安排")
             return
@@ -977,12 +949,10 @@ class MiniCalendarDialog(QDialog):
 
     # -------- 交互 --------
     def toggle_done(self, sched, val):
-        self.pet.mark_schedule_done(sched, self.sel_date, val)
-        self.refresh_list()
+        self.service.mark_schedule_done(sched, self.sel_date, val)
 
     def on_checkin(self, item, val):
-        self.pet.do_checkin(item, self.sel_date, val)
-        self.refresh_list()
+        self.service.do_checkin(item, self.sel_date, val)
 
     def shift_month(self, delta):
         m = self.view_month + delta
@@ -1011,7 +981,7 @@ class MiniCalendarDialog(QDialog):
             self.view_year, self.view_month = d.year, d.month
         self.refresh_list()
         # 需求②：点了有安排的日子，桌宠说出安排内容
-        if schedules_of_day(self.pet.config, d):
+        if self.service.get_schedules_of_day(d):
             self.pet.speak_today_plan(d)
 
     def add_on_selected(self):
@@ -1023,11 +993,10 @@ class MiniCalendarDialog(QDialog):
         dlg.show()
         self._detail = dlg
 
-class CheckinDialog(QDialog):
+class CheckinDialog(CalendarDialog):
     """📌 每日打卡：每天 0 点自动翻篇，全部完成有额外碎片奖励"""
-    def __init__(self, parent_pet):
-        super().__init__(parent_pet)
-        self.pet = parent_pet
+    def __init__(self, service, parent=None):
+        super().__init__(service, parent)
         self.setWindowTitle("📌 每日打卡")
         self.setMinimumSize(360, 420)
         self.resize(480, 520)
@@ -1062,10 +1031,10 @@ class CheckinDialog(QDialog):
         self.list_widget.clear()
         d = date.today()
         show_arc = self.show_archived.isChecked()
-        items = [c for c in self.pet.config.get("checkins", [])
+        items = [c for c in self.service.config.get("checkins", [])
                  if isinstance(c, dict) and (show_arc or not c.get("archived"))]
 
-        act = active_checkins(self.pet.config)
+        act = self.service.get_active_checkins()
         done = sum(1 for c in act if checkin_done_on(c, d))
         self.header.setText(f"今天（{d.strftime('%m月%d日')}）已完成 {done} / {len(act)} 项"
                             + ("　🎉 全勤达成！" if act and done >= len(act) else ""))
@@ -1088,7 +1057,7 @@ class CheckinDialog(QDialog):
             cb.setEnabled(not c.get("archived", False))
             cb.toggled.connect(lambda v, ci=c: self.toggle(ci, v))
 
-            streak = checkin_streak(c, d)
+            streak = self.service.get_checkin_streak(c)
             times = "，".join(c.get("remind_times", [])) or "不提醒"
             state = "（已归档）" if c.get("archived") else ("" if c.get("enabled", True) else "（已停用）")
             txt = (f"<b>{c.get('name','')}</b>{state}"
@@ -1128,8 +1097,7 @@ class CheckinDialog(QDialog):
             self.list_widget.setItemWidget(it, w)
 
     def toggle(self, item, val):
-        self.pet.do_checkin(item, date.today(), val)
-        self.refresh_list()
+        self.service.do_checkin(item, date.today(), val)
 
     def add_item(self):
         EditCheckinDialog(self).show()
@@ -1138,9 +1106,7 @@ class CheckinDialog(QDialog):
         EditCheckinDialog(self, item=item).show()
 
     def toggle_archive(self, item):
-        item["archived"] = not item.get("archived", False)
-        save_config(self.pet.config)
-        self.refresh_list()
+        self.service.update_checkin(item, {"archived": not item.get("archived", False)})
 
     def delete(self, item):
         if QMessageBox.question(
@@ -1150,23 +1116,14 @@ class CheckinDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         ) != QMessageBox.StandardButton.Yes:
             return
-        cid = item.get("id")
-        lst = self.pet.config.get("checkins", [])
-        for i, c in enumerate(lst):
-            if c.get("id") == cid:
-                del lst[i]
-                break
-        save_config(self.pet.config)
-        self.pet.refresh_dialogs("dlg_MiniCalendarDialog", "dlg_StatsDialog")
-        self.refresh_list()
+        self.service.delete_checkin(item.get("id"))
 
-class StatsDialog(QDialog):
+class StatsDialog(CalendarDialog):
     """📊 简单统计：今日情况 + 近一段时间的完成量（纯文字+色条，不引入任何绘图库）"""
     RANGES = [("最近 7 天", 7), ("最近 30 天", 30), ("最近 90 天", 90)]
 
-    def __init__(self, parent_pet):
-        super().__init__(parent_pet)
-        self.pet = parent_pet
+    def __init__(self, service, parent=None):
+        super().__init__(service, parent)
         self.setWindowTitle("📊 日程与打卡统计")
         self.resize(520, 560)
         lay = QVBoxLayout(self)
@@ -1201,20 +1158,6 @@ class StatsDialog(QDialog):
 
         self.refresh_list()
 
-    def _collect(self, days):
-        today = date.today()
-        rows = []
-        for i in range(days - 1, -1, -1):
-            d = today - timedelta(days=i)
-            items = schedules_of_day(self.pet.config, d)
-            total = len(items)
-            done = sum(1 for s in items if sched_done_on(s, d))
-            acts = active_checkins(self.pet.config)
-            c_total = len(acts)
-            c_done = sum(1 for c in acts if checkin_done_on(c, d))
-            rows.append((d, total, done, c_total, c_done))
-        return rows
-
     @staticmethod
     def _bar(done, total, width=16):
         if total <= 0:
@@ -1226,11 +1169,11 @@ class StatsDialog(QDialog):
 
     def refresh_list(self):
         days = self.RANGES[self.range_combo.currentIndex()][1]
-        rows = self._collect(days)
+        rows = self.service.get_stats(days)
         today = date.today()
 
-        acts = active_checkins(self.pet.config)
-        today_items = schedules_of_day(self.pet.config, today)
+        acts = self.service.get_active_checkins()
+        today_items = self.service.get_schedules_of_day(today)
         t_done = sum(1 for s in today_items if sched_done_on(s, today))
         c_done = sum(1 for c in acts if checkin_done_on(c, today))
 
@@ -1254,11 +1197,11 @@ class StatsDialog(QDialog):
         if acts:
             html.append("<h3>🔥 各项打卡连续天数</h3><p>")
             for c in acts:
-                s = checkin_streak(c, today)
+                s = self.service.get_checkin_streak(c)
                 html.append(f"{c.get('name','')}：<b>{s}</b> 天　")
             html.append("</p>")
 
-        st = self.pet.config.get("stats", {})
+        st = self.service.config.get("stats", {})
         html.append(f"<h3>🏆 累计</h3><p>历史完成待办 <b>{st.get('todo_done_total', 0)}</b> 个　|　"
                     f"历史打卡 <b>{st.get('checkin_done_total', 0)}</b> 次</p>")
 
@@ -1281,7 +1224,7 @@ class StatsDialog(QDialog):
 
     def speak_review(self):
         days = self.RANGES[self.range_combo.currentIndex()][1]
-        rows = self._collect(days)
+        rows = self.service.get_stats(days)
         total_done = sum(r[2] for r in rows)
         total_all = sum(r[1] for r in rows)
         cd = sum(r[4] for r in rows)
