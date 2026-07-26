@@ -146,10 +146,10 @@ class EditScheduleDialog(QDialog):
     这里是“日程 ↔ 日历”联动的核心：可以自由选择是否绑定日期，
     绑定后还能设定 每天/每周/每月/每年/每N天 的重复周期。
     """
-    def __init__(self, parent, sched=None, default_date=None, default_category=None):
+    def __init__(self, service, parent, sched=None, default_date=None, default_category=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.pet = parent.pet if hasattr(parent, "pet") else parent
+        self.service = service
         self.sched = sched                      # None 表示新建
         self.is_new = sched is None
         self.setWindowTitle("✏️ 编辑日程" if not self.is_new else "➕ 新建日程")
@@ -259,24 +259,17 @@ class EditScheduleDialog(QDialog):
             "note": self.note_edit.toPlainText().strip(),
         }
         if self.is_new:
-            data.update({"id": new_id(), "status": "pending", "notified": False,
-                         "alarm_on": True, "done_dates": []})
-            self.pet.config.setdefault("schedules", []).append(data)
+            self.service.add_schedule(data)
         else:
-            self.sched.update(data)
-            self.sched["notified"] = False  # 改过时间后，今天应该重新提醒
+            self.service.update_schedule(self.sched, data)
         self.accept()
-        QTimer.singleShot(
-            0, lambda pet=self.pet: (
-                save_config(pet.config),
-                pet.refresh_dialogs("dlg_ScheduleDialog", "dlg_MiniCalendarDialog", "dlg_StatsDialog")))
 
 class EditCheckinDialog(QDialog):
     """➕ 新建 / ✏️ 编辑 每日打卡项目"""
-    def __init__(self, parent, item=None):
+    def __init__(self, service, parent, item=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.pet = parent.pet if hasattr(parent, "pet") else parent
+        self.service = service
         self.item = item
         self.is_new = item is None
         self.setWindowTitle("✏️ 编辑打卡项目" if not self.is_new else "➕ 新建打卡项目")
@@ -330,15 +323,10 @@ class EditCheckinDialog(QDialog):
         data = {"name": name, "note": self.note_edit.toPlainText().strip(),
                 "remind_times": times, "enabled": self.enable_check.isChecked()}
         if self.is_new:
-            data.update({"id": new_id(), "created": today_str(), "done_dates": [], "archived": False})
-            self.pet.config.setdefault("checkins", []).append(data)
+            self.service.add_checkin(data)
         else:
-            self.item.update(data)
+            self.service.update_checkin(self.item, data)
         self.accept()
-        QTimer.singleShot(
-            0, lambda pet=self.pet: (
-                save_config(pet.config),
-                pet.refresh_dialogs("dlg_CheckinDialog", "dlg_MiniCalendarDialog", "dlg_StatsDialog")))
 
 class ScheduleDialog(CalendarDialog):
     def __init__(self, service, parent=None):
@@ -602,7 +590,7 @@ class ScheduleDialog(CalendarDialog):
         self.service.update_schedule(sched, {"alarm_on": not sched.get("alarm_on", True)})
 
     def edit_task(self, sched):
-        dlg = EditScheduleDialog(self, sched=sched)
+        dlg = EditScheduleDialog(self.service, self, sched=sched)
         dlg.show()
 
     def mark_done(self, sched, done=True):
@@ -622,7 +610,7 @@ class ScheduleDialog(CalendarDialog):
         self.service.delete_schedule(sched.get("id"))
 
     def add_detailed(self):
-        dlg = EditScheduleDialog(self, default_category=self.cat_combo.currentText())
+        dlg = EditScheduleDialog(self.service, self, default_category=self.cat_combo.currentText())
         dlg.show()
 
     def add_schedule(self):
@@ -638,12 +626,11 @@ class ScheduleDialog(CalendarDialog):
         })
         self.task_input.clear()
 
-class DayDetailDialog(QDialog):
+class DayDetailDialog(CalendarDialog):
     """点击日历格子后弹出的迷你详情窗：显示当天的日程与打卡，可直接勾选/编辑/新增"""
-    def __init__(self, parent, the_date):
-        super().__init__(parent)
+    def __init__(self, service, parent, the_date):
+        super().__init__(service, parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.pet = parent.pet if hasattr(parent, "pet") else parent
         self.the_date = the_date
         self.setWindowTitle(the_date.strftime("%Y年%m月%d日"))
         self.setWindowFlags(Qt.WindowType.Tool)
@@ -674,8 +661,8 @@ class DayDetailDialog(QDialog):
     def refresh_list(self):
         self.list_widget.clear()
         d = self.the_date
-        items = schedules_of_day(self.pet.config, d)
-        checks = active_checkins(self.pet.config) if d == date.today() else []
+        items = self.service.get_schedules_of_day(d)
+        checks = self.service.get_active_checkins() if d == date.today() else []
         done_n = sum(1 for s in items if sched_done_on(s, d))
         self.title.setText(f"{d.strftime('%m月%d日')} · 日程 {done_n}/{len(items)}")
 
@@ -718,7 +705,7 @@ class DayDetailDialog(QDialog):
                 h.setContentsMargins(2, 2, 2, 2)
                 cb = QCheckBox(c.get("name", ""))
                 cb.setChecked(checkin_done_on(c, d))
-                cb.toggled.connect(lambda v, ci=c: self.pet.do_checkin(ci, self.the_date, v))
+                cb.toggled.connect(lambda v, ci=c: self.service.do_checkin(ci, self.the_date, v))
                 h.addWidget(cb, stretch=1)
                 w.setMinimumHeight(54)
                 it = QListWidgetItem()
@@ -727,14 +714,14 @@ class DayDetailDialog(QDialog):
                 self.list_widget.setItemWidget(it, w)
 
     def toggle(self, sched, val):
-        self.pet.mark_schedule_done(sched, self.the_date, val)
+        self.service.mark_schedule_done(sched, self.the_date, val)
         self.refresh_list()
 
     def edit(self, sched):
-        EditScheduleDialog(self, sched=sched).show()
+        EditScheduleDialog(self.service, self, sched=sched).show()
 
     def add_here(self):
-        EditScheduleDialog(self, default_date=self.the_date).show()
+        EditScheduleDialog(self.service, self, default_date=self.the_date).show()
 
     def speak(self):
         self.pet.speak_today_plan(self.the_date)
@@ -985,10 +972,10 @@ class MiniCalendarDialog(CalendarDialog):
             self.pet.speak_today_plan(d)
 
     def add_on_selected(self):
-        EditScheduleDialog(self, default_date=self.sel_date).show()
+        EditScheduleDialog(self.service, self, default_date=self.sel_date).show()
 
     def open_detail(self):
-        dlg = DayDetailDialog(self, self.sel_date)
+        dlg = DayDetailDialog(self.service, self, self.sel_date)
         dlg.move(self.x() + self.width() + 10, self.y())
         dlg.show()
         self._detail = dlg
@@ -1100,10 +1087,10 @@ class CheckinDialog(CalendarDialog):
         self.service.do_checkin(item, date.today(), val)
 
     def add_item(self):
-        EditCheckinDialog(self).show()
+        EditCheckinDialog(self.service, self).show()
 
     def edit(self, item):
-        EditCheckinDialog(self, item=item).show()
+        EditCheckinDialog(self.service, self, item=item).show()
 
     def toggle_archive(self, item):
         self.service.update_checkin(item, {"archived": not item.get("archived", False)})
