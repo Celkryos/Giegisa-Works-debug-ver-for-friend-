@@ -1,6 +1,78 @@
 from .common import *
 import calendar as _pycalendar
 
+class CalendarDialog(QDialog):
+    """日程/打卡 Dialog 基类。
+
+    统一管理 CalendarService 信号的生命周期：
+    - showEvent 连接信号 → 自动刷新
+    - hideEvent 断开信号 → WA_DeleteOnClose 窗口安全销毁
+    - closeEvent 强制断开 → 双重保险
+    """
+
+    def __init__(self, service, parent=None):
+        super().__init__(parent)
+        self.service = service
+        self._connected = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._connected:
+            self._connect_service_signals()
+            self._connected = True
+        if hasattr(self, 'refresh_list'):
+            self.refresh_list()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._disconnect_service_signals()
+        self._connected = False
+
+    def closeEvent(self, event):
+        self._disconnect_service_signals()
+        self._connected = False
+        super().closeEvent(event)
+
+    def _connect_service_signals(self):
+        try:
+            self.service.schedules_changed.connect(self._on_schedules_changed)
+        except TypeError:
+            pass
+        try:
+            self.service.checkins_changed.connect(self._on_checkins_changed)
+        except TypeError:
+            pass
+
+    def _disconnect_service_signals(self):
+        try:
+            self.service.schedules_changed.disconnect(self._on_schedules_changed)
+        except TypeError:
+            pass
+        try:
+            self.service.checkins_changed.disconnect(self._on_checkins_changed)
+        except TypeError:
+            pass
+
+    @property
+    def pet(self):
+        """获取 DesktopPet 引用。仅用于需要 AI 语音等 pet 能力的场景。
+        向上遍历 parent 链查找 DesktopPet 实例。"""
+        p = self.parent()
+        while p is not None:
+            if hasattr(p, 'speak_today_plan'):
+                return p
+            p = p.parent()
+        return None
+
+    def _on_schedules_changed(self):
+        if self.isVisible() and hasattr(self, 'refresh_list'):
+            self.refresh_list()
+
+    def _on_checkins_changed(self):
+        if self.isVisible() and hasattr(self, 'refresh_list'):
+            self.refresh_list()
+
+
 class ScheduleAlertDialog(QDialog):
     def __init__(self, task_name, parent_pet, detail=""):
         super().__init__(parent_pet)
