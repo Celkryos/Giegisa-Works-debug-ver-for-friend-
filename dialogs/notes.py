@@ -1,7 +1,9 @@
 from .common import *
 
 class EditNoteDialog(QDialog):
-    """便签热编辑面板 —— 以调用方对话框为 parent，避免模态锁死整个应用。"""
+    """便签热编辑面板 —— 非模态，保存后通过信号通知父窗口刷新。"""
+    saved = pyqtSignal()
+
     def __init__(self, parent, note):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -11,25 +13,20 @@ class EditNoteDialog(QDialog):
         self.setWindowFlags(Qt.WindowType.Dialog)
         self.resize(400, 300)
         self.layout = QVBoxLayout(self)
-        
+
         self.text_edit = QTextEdit()
         self.text_edit.setPlainText(note.get("text", ""))
         self.layout.addWidget(self.text_edit)
-        
+
         btn = QPushButton("💾 保存修改")
         btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px; font-weight: bold;")
         btn.clicked.connect(self.save_edit)
         self.layout.addWidget(btn)
-        
+
     def save_edit(self):
         self.note["text"] = self.text_edit.toPlainText().strip()
+        self.saved.emit()
         self.accept()
-        # 通过 parent_dialog 找到 pet 来保存和刷新
-        pet = self.parent_dialog.pet if hasattr(self.parent_dialog, "pet") else self.parent_dialog
-        QTimer.singleShot(
-            0, lambda: (
-                save_config(pet.config),
-                pet.refresh_dialogs("dlg_NotesManagerDialog")))
 
 class QuickNoteDialog(QDialog):
     def __init__(self, parent_pet):
@@ -60,7 +57,7 @@ class QuickNoteDialog(QDialog):
     def save_note(self):
         text = self.input_box.toPlainText().strip()
         if not text: return
-        
+
         txt_path = os.path.join(BASE_DIR, "notes.txt")
         # notes.txt 只是方便人直接阅读的额外备份；即使目录只读或磁盘暂时
         # 不可写，也不能影响便签本身保存到 config.json。
@@ -69,25 +66,23 @@ class QuickNoteDialog(QDialog):
                 f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {text}\n")
         except Exception:
             pass  # notes.txt 只是额外备份，写入失败不影响主流程
-            
+
         self.pet.config.setdefault("notes", []).append({
-            "id": new_id(), 
+            "id": new_id(),
             "time": datetime.now().strftime('%Y-%m-%d %H:%M'),
-            "text": text, 
-            "status": "active", 
-            "folder": "默认便签", 
-            "pinned": False, 
+            "text": text,
+            "status": "active",
+            "folder": "默认便签",
+            "pinned": False,
             "locked": False
         })
         self.input_box.clear()
+        save_config(self.pet.config)
+        self.pet.inject_system_event(
+            "系统：用户记录了一条便签",
+            "【normal】已将你的杂念转录至底层存储区。")
+        self.pet.refresh_dialogs("dlg_NotesManagerDialog")
         self.accept()
-        QTimer.singleShot(
-            0, lambda pet=self.pet: (
-                save_config(pet.config),
-                pet.inject_system_event(
-                    "系统：用户记录了一条便签",
-                    "【normal】已将你的杂念转录至底层存储区。"),
-                pet.refresh_dialogs("dlg_NotesManagerDialog")))
 
 class NotesManagerDialog(QDialog):
     """【重构】带有分组、置顶、排序的终极便签管理器"""
@@ -299,8 +294,11 @@ class NotesManagerDialog(QDialog):
 
     def open_editor(self, note):
         dlg = EditNoteDialog(self, note)
-        if dlg.exec():
-            self.refresh_list()
+        dlg.saved.connect(lambda: (
+            save_config(self.pet.config),
+            self.pet.refresh_dialogs("dlg_NotesManagerDialog"),
+            self.refresh_list()))
+        dlg.show()
 
     def toggle_pin(self, note):
         note["pinned"] = not note.get("pinned", False)

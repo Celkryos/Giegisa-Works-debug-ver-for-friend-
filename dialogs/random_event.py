@@ -7,11 +7,12 @@ class RandomEventDialog(QDialog):
         self.event_data = event_data
         self.setWindowTitle("✨ 随机遭遇事件！")
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Dialog)
-        self.resize(350, 150)
+        self.setMinimumSize(300, 120)
         self.layout = QVBoxLayout(self)
-        
+
         lbl = QLabel(f"<b>【突发情景】</b><br>{event_data.get('scenario', '')}")
         lbl.setWordWrap(True)
+        lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.layout.addWidget(lbl)
         
         btn_layout = QHBoxLayout()
@@ -26,6 +27,18 @@ class RandomEventDialog(QDialog):
         btn_layout.addWidget(btn_a)
         btn_layout.addWidget(btn_b)
         self.layout.addLayout(btn_layout)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.adjustSize()
+        if self.width() > 500:
+            self.resize(500, self.height())
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            self.move(
+                max(geo.left(), min(self.x(), geo.right() - self.width() + 1)),
+                max(geo.top(), min(self.y(), geo.bottom() - self.height() + 1)))
 
     def make_choice(self, choice):
         res_text = str(self.event_data.get(f'res{choice}_text', ''))

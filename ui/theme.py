@@ -225,11 +225,36 @@ QDialog QTimeEdit::drop-down {
     border-top-right-radius: 9px;
     border-bottom-right-radius: 9px;
 }
+QDialog QComboBox::down-arrow,
+QDialog QDateEdit::down-arrow,
+QDialog QTimeEdit::down-arrow {
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCA2Ij48cG9seWdvbiBwb2ludHM9IjAsMCA1LDYgMTAsMCIgZmlsbD0iIzI0NDE1ZiIvPjwvc3ZnPg==);
+    width: 10px;
+    height: 6px;
+}
 QDialog QSpinBox::up-button,
 QDialog QSpinBox::down-button {
     width: 20px;
     border: 0;
     background-color: rgba(192, 229, 252, 135);
+}
+QDialog QSpinBox::up-button {
+    subcontrol-position: top right;
+    border-top-right-radius: 9px;
+}
+QDialog QSpinBox::down-button {
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: 9px;
+}
+QDialog QSpinBox::up-arrow {
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCA2Ij48cG9seWdvbiBwb2ludHM9IjAsNiA1LDAgMTAsNiIgZmlsbD0iIzI0NDE1ZiIvPjwvc3ZnPg==);
+    width: 10px;
+    height: 6px;
+}
+QDialog QSpinBox::down-arrow {
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCA2Ij48cG9seWdvbiBwb2ludHM9IjAsMCA1LDYgMTAsMCIgZmlsbD0iIzI0NDE1ZiIvPjwvc3ZnPg==);
+    width: 10px;
+    height: 6px;
 }
 QToolTip {
     color: #20435d;

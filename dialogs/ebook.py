@@ -886,7 +886,16 @@ class EbookReaderDialog(QDialog):
                 self.settings.get("background_opacity", 100)))) / 100.0)
             mode = self.settings.get("background_mode", "适应")
             if mode == "平铺":
-                painter.drawTiledPixmap(canvas.rect(), source)
+                tile_w = max(64, width // 3)
+                tile_h = max(48, int(tile_w * source.height() / max(1, source.width())))
+                if tile_h > height // 2:
+                    tile_h = max(48, height // 2)
+                    tile_w = max(64, int(tile_h * source.width() / max(1, source.height())))
+                tiled = source.scaled(
+                    tile_w, tile_h,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
+                painter.drawTiledPixmap(canvas.rect(), tiled)
             elif mode == "拉伸":
                 painter.drawPixmap(canvas.rect(), source)
             else:
