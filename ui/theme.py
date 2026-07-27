@@ -5,7 +5,10 @@
 图片如何裁切，也不需要分别复制样式。
 """
 
+import base64
 import os
+import struct
+import zlib
 
 from PyQt6.QtCore import QEvent, QObject, QPoint, QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap, QRegion
@@ -19,6 +22,67 @@ from PyQt6.QtWidgets import (
     QSizeGrip,
     QWidget,
 )
+
+from config import BASE_DIR
+
+
+def _arrow_down_png():
+    """返回 10×6 向下黑色三角 PNG 的完整内容。"""
+    raw = bytearray()
+    for y in range(6):
+        raw.append(0)
+        for x in range(10):
+            left = x / 9.0
+            yn = y / 5.0
+            raw.extend([0x24, 0x41, 0x5f, 0xff] if yn >= (1 - abs(left - 0.5) * 2) and 0 <= y <= 5
+                       else [0, 0, 0, 0])
+
+    def _chunk(ctype, data):
+        c = ctype + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+
+    ihdr = struct.pack(">IIBBBBB", 10, 6, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", zlib.compress(bytes(raw)))
+            + _chunk(b"IEND", b""))
+
+
+def _arrow_up_png():
+    """返回 10×6 向上黑色三角 PNG 的完整内容。"""
+    raw = bytearray()
+    for y in range(6):
+        raw.append(0)
+        for x in range(10):
+            left = x / 9.0
+            yn = y / 5.0
+            raw.extend([0x24, 0x41, 0x5f, 0xff] if 1 <= y <= 6 and yn <= abs(left - 0.5) * 2
+                       else [0, 0, 0, 0])
+
+    def _chunk(ctype, data):
+        c = ctype + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+
+    ihdr = struct.pack(">IIBBBBB", 10, 6, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", zlib.compress(bytes(raw)))
+            + _chunk(b"IEND", b""))
+
+
+def _ensure_arrow_icons():
+    """将箭头 PNG 写入缓存目录，返回 (down_path, up_path)。"""
+    cache_dir = os.path.join(BASE_DIR, ".cache", "theme")
+    os.makedirs(cache_dir, exist_ok=True)
+    down_path = os.path.join(cache_dir, "arrow_down.png")
+    up_path = os.path.join(cache_dir, "arrow_up.png")
+    if not os.path.isfile(down_path):
+        with open(down_path, "wb") as f:
+            f.write(_arrow_down_png())
+    if not os.path.isfile(up_path):
+        with open(up_path, "wb") as f:
+            f.write(_arrow_up_png())
+    return down_path, up_path
 
 
 ICE_GLASS_QSS = r"""
@@ -228,7 +292,6 @@ QDialog QTimeEdit::drop-down {
 QDialog QComboBox::down-arrow,
 QDialog QDateEdit::down-arrow,
 QDialog QTimeEdit::down-arrow {
-    image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAGCAYAAAD68A/GAAAAKElEQVR4nGNQcYz/z0AAgNWQpBCfYrg8jIFNMYocMgdZMYY4ugAuDAB2SjhhqIWulAAAAABJRU5ErkJggg==);
     width: 10px;
     height: 6px;
 }
@@ -247,12 +310,10 @@ QDialog QSpinBox::down-button {
     border-bottom-right-radius: 9px;
 }
 QDialog QSpinBox::up-arrow {
-    image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAGCAYAAAD68A/GAAAAJUlEQVR4nGNgIBaoOMb/R8Y4xbEpwqaYAZcidMUM+BQhKyZaIQDs6ybDffugvQAAAABJRU5ErkJggg==);
     width: 10px;
     height: 6px;
 }
 QDialog QSpinBox::down-arrow {
-    image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAGCAYAAAD68A/GAAAAKElEQVR4nGNQcYz/z0AAgNWQpBCfYrg8jIFNMYocMgdZMYY4ugAuDAB2SjhhqIWulAAAAABJRU5ErkJggg==);
     width: 10px;
     height: 6px;
 }
@@ -501,7 +562,24 @@ def install_ice_glass_theme(app: QApplication, background_path: str):
     if existing is not None:
         return existing
 
-    app.setStyleSheet(ICE_GLASS_QSS)
+    down_path, up_path = _ensure_arrow_icons()
+    arrow_qss = (
+        f"QDialog QComboBox::down-arrow,"
+        f"QDialog QDateEdit::down-arrow,"
+        f"QDialog QTimeEdit::down-arrow {{"
+        f"    image: url({down_path});"
+        f"    width: 10px; height: 6px;"
+        f"}}"
+        f"QDialog QSpinBox::up-arrow {{"
+        f"    image: url({up_path});"
+        f"    width: 10px; height: 6px;"
+        f"}}"
+        f"QDialog QSpinBox::down-arrow {{"
+        f"    image: url({down_path});"
+        f"    width: 10px; height: 6px;"
+        f"}}"
+    )
+    app.setStyleSheet(ICE_GLASS_QSS + arrow_qss)
     theme = IceGlassTheme(app, background_path)
     app.installEventFilter(theme)
     app._giegisa_ice_theme = theme
