@@ -245,17 +245,40 @@ def _parse_pdf(path, asset_dir):
         pass
     if doc is not None:
         try:
+            from PyQt6.QtWidgets import QApplication
             meta = doc.metadata
             title = (meta or {}).get("title") or Path(path).stem
-            for index in range(len(doc)):
-                page = doc.load_page(index)
+            total = len(doc)
+            large_pdf = total > 100
+            per_page_image_limit = 6 if large_pdf else 12
+            min_image_bytes = 2048
+            for index in range(total):
+                try:
+                    page = doc.load_page(index)
+                except Exception:
+                    chapters.append({
+                        "title": f"第 {index + 1} 页",
+                        "text": "",
+                        "images": [],
+                    })
+                    if (index + 1) % 5 == 0 or index == total - 1:
+                        QApplication.processEvents()
+                    continue
                 images = []
-                for image_index, item in enumerate(page.get_images(full=True)[:12]):
+                for image_index, item in enumerate(page.get_images(full=True)):
+                    if image_index >= per_page_image_limit:
+                        break
                     try:
                         data = doc.extract_image(item[0])
-                        out = Path(asset_dir, f"page_{index + 1}_img_{image_index + 1}.{data['ext']}")
+                        raw = data.get("image", b"")
+                        # 跳过过小的图片（装饰元素、结构碎片），减少无用 I/O
+                        if len(raw) < min_image_bytes:
+                            continue
+                        out = Path(
+                            asset_dir,
+                            f"page_{index + 1}_img_{image_index + 1}.{data['ext']}")
                         out.parent.mkdir(parents=True, exist_ok=True)
-                        out.write_bytes(data["image"])
+                        out.write_bytes(raw)
                         images.append(str(out))
                     except Exception:
                         pass
@@ -264,20 +287,33 @@ def _parse_pdf(path, asset_dir):
                     "text": clean_text(page.get_text("text")),
                     "images": images,
                 })
+                if (index + 1) % 5 == 0 or index == total - 1:
+                    QApplication.processEvents()
             return title, chapters, "PDF/PyMuPDF"
         finally:
             doc.close()
     # fallback：用 pypdf
     try:
+        from PyQt6.QtWidgets import QApplication
         from pypdf import PdfReader
         reader = PdfReader(path)
         title = getattr(reader.metadata, "title", "") or Path(path).stem
+        total = len(reader.pages)
         for index, page in enumerate(reader.pages):
-            chapters.append({
-                "title": f"第 {index + 1} 页",
-                "text": clean_text(page.extract_text() or ""),
-                "images": [],
-            })
+            try:
+                chapters.append({
+                    "title": f"第 {index + 1} 页",
+                    "text": clean_text(page.extract_text() or ""),
+                    "images": [],
+                })
+            except Exception:
+                chapters.append({
+                    "title": f"第 {index + 1} 页",
+                    "text": "",
+                    "images": [],
+                })
+            if (index + 1) % 10 == 0 or index == total - 1:
+                QApplication.processEvents()
         return title, chapters, "PDF/pypdf"
     except Exception as exc:
         raise ValueError(f"无法解析 PDF（已尝试 PyMuPDF 和 pypdf）：{exc}") from exc

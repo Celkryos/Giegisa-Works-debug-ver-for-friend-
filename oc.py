@@ -101,6 +101,10 @@ class DesktopPet(QWidget):
         self._bubble_hold_until = 0.0
         self._bubble_dispatch_pending = False
 
+        # 启动时清理上次残留的电子书副本
+        from dialogs.ebook import _cleanup_pending_ebook_deletions
+        QTimer.singleShot(0, _cleanup_pending_ebook_deletions)
+
         self.init_images()
         self.init_ui()
 

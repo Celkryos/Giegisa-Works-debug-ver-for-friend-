@@ -1,11 +1,14 @@
 """静默阅读舱：书架、阅读器、标记、自动阅读与阅读目标。"""
 
+import gc
 import html
 import hashlib
+import json
 import os
 import random
 import re
 import shutil
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -34,6 +37,7 @@ from core.ebook import (
 from core.utils import new_id, checkin_done_on
 
 EBOOK_DIR = os.path.join(BASE_DIR, "ebook_library")
+_PENDING_CLEANUP_FILE = os.path.join(EBOOK_DIR, "_pending_cleanup.json")
 HIGHLIGHT_COLORS = ["#dbeafe", "#fecaca", "#fef3c7", "#dcfce7", "#cffafe", "#ddd6fe"]
 VISUAL_SETTING_KEYS = (
     "font", "font_size", "line_spacing", "letter_spacing", "text_color",
@@ -93,16 +97,56 @@ def _format_size(size):
         value /= 1024
 
 
+def _cleanup_pending_ebook_deletions():
+    """启动时清理上次未能删除的电子书副本目录。"""
+    marker = _PENDING_CLEANUP_FILE
+    if not os.path.isfile(marker):
+        return
+    try:
+        with open(marker, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+        if not isinstance(entries, list):
+            entries = [entries]
+    except Exception:
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        return
+    remaining = []
+    for entry in entries:
+        folder = entry.get("folder", "") if isinstance(entry, dict) else str(entry)
+        root = os.path.abspath(EBOOK_DIR)
+        target = os.path.abspath(folder) if folder else ""
+        if (os.path.commonpath((root, target)) == root
+                and os.path.isdir(target)):
+            try:
+                shutil.rmtree(target)
+            except Exception:
+                remaining.append(entry)
+    if remaining:
+        try:
+            with open(marker, "w", encoding="utf-8") as f:
+                json.dump(remaining, f, ensure_ascii=False)
+        except Exception:
+            pass
+    else:
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+
+
 class ReaderTextBrowser(QTextBrowser):
     image_double_clicked = pyqtSignal(str)
 
-    def mouseDoubleClickEvent(self, event):
-        cursor = self.cursorForPosition(event.position().toPoint())
+    def mouseDoubleClickEvent(self, a0):
+        cursor = self.cursorForPosition(a0.position().toPoint())
         image_format = cursor.charFormat().toImageFormat()
         if image_format.isValid() and image_format.name():
             self.image_double_clicked.emit(image_format.name())
             return
-        super().mouseDoubleClickEvent(event)
+        super().mouseDoubleClickEvent(a0)
 
 
 class ImagePreviewDialog(QDialog):
@@ -162,23 +206,23 @@ class AutoReadControls(QDialog):
             y = max(available.top(), min(y, available.bottom() - self.height() + 1))
         self.move(x, y)
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+    def mousePressEvent(self, a0):
+        if a0.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = a0.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            a0.accept()
             return
-        super().mousePressEvent(event)
+        super().mousePressEvent(a0)
 
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.MouseButton.LeftButton and not self._drag_offset.isNull():
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
-            event.accept()
+    def mouseMoveEvent(self, a0):
+        if a0.buttons() & Qt.MouseButton.LeftButton and not self._drag_offset.isNull():
+            self.move(a0.globalPosition().toPoint() - self._drag_offset)
+            a0.accept()
             return
-        super().mouseMoveEvent(event)
+        super().mouseMoveEvent(a0)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, a0):
         self._drag_offset = QPoint()
-        super().mouseReleaseEvent(event)
+        super().mouseReleaseEvent(a0)
 
 
 class EbookReaderDialog(QDialog):
@@ -329,9 +373,10 @@ class EbookReaderDialog(QDialog):
         self.text.customContextMenuRequested.connect(self._reader_menu)
         self.text.image_double_clicked.connect(self._open_image_preview)
         self.text.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.text.viewport().setAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.text.viewport().setAutoFillBackground(False)
+        if self.text.viewport() is not None:
+            self.text.viewport().setAttribute(
+                Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self.text.viewport().setAutoFillBackground(False)
         self.reading_surface = QWidget()
         surface_stack = QStackedLayout(self.reading_surface)
         surface_stack.setContentsMargins(0, 0, 0, 0)
@@ -683,6 +728,8 @@ class EbookReaderDialog(QDialog):
             return
         finally:
             QApplication.restoreOverrideCursor()
+        if not self.parsed:
+            return
         self.book["title"] = self.parsed["title"] or self.book.get("title")
         self.book["size"] = self.parsed["size"]
         self.book["total_chars"] = self.parsed["total_chars"]
@@ -698,6 +745,8 @@ class EbookReaderDialog(QDialog):
         save_config(self.pet.config)
 
     def _rebuild_text(self):
+        if not self.parsed:
+            return
         self.chapter_starts = []
         self.inline_images = {}
         self.block_image_positions = set()
@@ -732,10 +781,13 @@ class EbookReaderDialog(QDialog):
         self.repaginate(int(self.book.get("position", 0) or 0))
 
     def _page_capacity(self):
+        viewport = self.text.viewport()
+        if viewport is None:
+            return 400
         size = max(10, int(self.settings.get("font_size", 10)))
         spacing = max(0.8, float(self.settings.get("line_spacing", 1.5)))
-        width = max(240, self.text.viewport().width() - 30)
-        height = max(150, self.text.viewport().height() - 20)
+        width = max(240, viewport.width() - 30)
+        height = max(150, viewport.height() - 20)
         # point 字号在 Windows 高 DPI 下会换算成更大的像素；额外预留段间距，
         # 保证默认页面无需再拖动正文内部滚动条。
         cols = max(10, int(width / (size * 1.32)))
@@ -745,9 +797,10 @@ class EbookReaderDialog(QDialog):
     def repaginate(self, absolute_position=None):
         if not self.parsed:
             return
-        # 首次调用时 widget 可能尚未 layout，viewport 返回默认尺寸（~100×30）。
+        viewport = self.text.viewport()
+        # 首次调用时 widget 可能尚未 layout，viewport 返回默认尺寸（~100×30）或 None。
         # 此时跳过，由后续 resizeEvent → _resize_repaginate 在正确尺寸下补上。
-        if self.text.viewport().width() < 100 or self.text.viewport().height() < 100:
+        if viewport is None or viewport.width() < 100 or viewport.height() < 100:
             return
         position = self._page_start() if absolute_position is None and self.pages else int(absolute_position or 0)
         capacity = self._page_capacity()
@@ -789,7 +842,7 @@ class EbookReaderDialog(QDialog):
         return self.pages[self.current_page][0] if self.pages else 0
 
     def show_page(self):
-        if not self.pages:
+        if not self.pages or not self.parsed:
             return
         start, end, chapter = self.pages[self.current_page]
         self.current_chapter = chapter
@@ -829,8 +882,13 @@ class EbookReaderDialog(QDialog):
             fmt.setName(os.path.abspath(path))
             pixmap = QPixmap(path)
             if not pixmap.isNull():
-                available_width = max(80, self.text.viewport().width() - 36)
-                available_height = max(100, self.text.viewport().height() - 36)
+                viewport = self.text.viewport()
+                if viewport is None:
+                    available_width = 500
+                    available_height = 500
+                else:
+                    available_width = max(80, viewport.width() - 36)
+                    available_height = max(100, viewport.height() - 36)
                 scale = min(
                     1.0,
                     available_width / max(1, pixmap.width()),
@@ -1017,29 +1075,33 @@ class EbookReaderDialog(QDialog):
         save_config(self.pet.config, force=False)
 
     def _sync_visual_controls(self):
-        controls = (
-            (self.font_combo, "font", QFont(self.settings.get("font", "Microsoft YaHei"))),
-            (self.font_size, "font_size", int(self.settings.get("font_size", 10))),
-            (self.line_spacing, "line_spacing", float(self.settings.get("line_spacing", 1.5))),
-            (self.letter_spacing, "letter_spacing", float(self.settings.get("letter_spacing", 0))),
-            (self.align_combo, "alignment", int(self.settings.get("alignment", 3))),
-            (self.bg_mode, "background_mode", self.settings.get("background_mode", "适应")),
-            (self.opacity, "background_opacity", int(self.settings.get("background_opacity", 100))),
-        )
-        for control, _, value in controls:
-            control.blockSignals(True)
-            if isinstance(control, QFontComboBox):
-                control.setCurrentFont(value)
-            elif isinstance(control, QComboBox):
-                if isinstance(value, int):
-                    control.setCurrentIndex(value)
-                else:
-                    control.setCurrentText(value)
-            elif isinstance(control, QDoubleSpinBox):
-                control.setValue(float(value))
-            else:
-                control.setValue(int(value))
-            control.blockSignals(False)
+        self.font_combo.blockSignals(True)
+        self.font_combo.setCurrentFont(QFont(self.settings.get("font", "Microsoft YaHei")))
+        self.font_combo.blockSignals(False)
+
+        self.font_size.blockSignals(True)
+        self.font_size.setValue(int(self.settings.get("font_size", 10)))
+        self.font_size.blockSignals(False)
+
+        self.line_spacing.blockSignals(True)
+        self.line_spacing.setValue(float(self.settings.get("line_spacing", 1.5)))
+        self.line_spacing.blockSignals(False)
+
+        self.letter_spacing.blockSignals(True)
+        self.letter_spacing.setValue(float(self.settings.get("letter_spacing", 0)))
+        self.letter_spacing.blockSignals(False)
+
+        self.align_combo.blockSignals(True)
+        self.align_combo.setCurrentIndex(int(self.settings.get("alignment", 3)))
+        self.align_combo.blockSignals(False)
+
+        self.bg_mode.blockSignals(True)
+        self.bg_mode.setCurrentText(self.settings.get("background_mode", "适应"))
+        self.bg_mode.blockSignals(False)
+
+        self.opacity.blockSignals(True)
+        self.opacity.setValue(int(self.settings.get("background_opacity", 100)))
+        self.opacity.blockSignals(False)
 
     def _apply_window_theme(self):
         night = bool(self.settings.get("night_mode", False))
@@ -1199,6 +1261,8 @@ class EbookReaderDialog(QDialog):
         save_config(self.pet.config)
 
     def add_bookmark(self):
+        if not self.pages or not self.parsed:
+            return
         start, _, chapter = self.pages[self.current_page]
         self.book.setdefault("bookmarks", []).append({
             "id": new_id(), "position": start,
@@ -1368,6 +1432,8 @@ class EbookReaderDialog(QDialog):
         save_config(self.pet.config)
 
     def talk_about_selection(self):
+        if not self.parsed:
+            return
         if not self._llm_configured():
             QMessageBox.information(
                 self, "尚未配置大模型",
@@ -1402,6 +1468,8 @@ class EbookReaderDialog(QDialog):
         return f"与 Gisa 交谈：{provider} / {model}\n状态：{state}。"
 
     def reload_cleaning(self):
+        if not self.parsed:
+            return
         self.settings["trim_whitespace"] = self.trim_check.isChecked()
         self.settings["repair_sentences"] = self.repair_check.isChecked()
         position = self._page_start()
@@ -1648,8 +1716,8 @@ class EbookReaderDialog(QDialog):
         self.close()
         self.pet.open_dialog(EbookShelfDialog)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0):
+        super().resizeEvent(a0)
         if self.parsed and not self._resize_pending:
             self._resize_pending = True
             QTimer.singleShot(180, self._resize_repaginate)
@@ -1659,27 +1727,27 @@ class EbookReaderDialog(QDialog):
         if self.parsed:
             self.repaginate()
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Left:
+    def keyPressEvent(self, a0):
+        if a0.key() == Qt.Key.Key_Left:
             self.prev_page()
-        elif event.key() == Qt.Key.Key_Right:
+        elif a0.key() == Qt.Key.Key_Right:
             self.next_page()
-        elif event.matches(QKeySequence.StandardKey.Find):
+        elif a0.matches(QKeySequence.StandardKey.Find):
             self.toggle_panel(3)
             self.search_input.setFocus()
-        elif event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_B:
+        elif a0.modifiers() & Qt.KeyboardModifier.ControlModifier and a0.key() == Qt.Key.Key_B:
             self.add_bookmark()
-        elif event.key() == Qt.Key.Key_Space and self._auto_running:
+        elif a0.key() == Qt.Key.Key_Space and self._auto_running:
             self.toggle_auto_pause()
         else:
-            super().keyPressEvent(event)
+            super().keyPressEvent(a0)
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0):
         self.stop_auto_read() if self._auto_running else None
         self.session_timer.stop()
         self.eye_timer.stop()
         if not self.parsed:
-            super().closeEvent(event)
+            super().closeEvent(a0)
             return
         self.book["position"] = self._page_start()
         self.book["last_read_seconds"] = self.session_seconds
@@ -1688,7 +1756,7 @@ class EbookReaderDialog(QDialog):
             self._closed_reported = True
             self.pet.show_bubble(
                 f"【normal】阅读进度已封存。下次会从《{self.book.get('title','')}》当前位置继续。")
-        super().closeEvent(event)
+        super().closeEvent(a0)
 
 
 class BookCardButton(QToolButton):
@@ -1716,9 +1784,9 @@ class BookCardButton(QToolButton):
             "QToolButton:hover{background:#e1f3ff;border-color:#62b9f4;}"
             "QToolButton:checked{background:#ccecff;border:2px solid #3aa6e8;}")
 
-    def mouseDoubleClickEvent(self, event):
+    def mouseDoubleClickEvent(self, a0):
         self.open_requested.emit(self.book)
-        event.accept()
+        a0.accept()
 
 
 class EbookShelfDialog(QDialog):
@@ -2131,6 +2199,10 @@ class EbookShelfDialog(QDialog):
         book = self.selected_book()
         if not book:
             return
+        book_id = book.get("id")
+        if not book_id:
+            self.pet.show_bubble("【normal】这本书的记录不完整，缺少标识，无法安全删除。")
+            return
         message = "从书架删除这本书？"
         if book.get("managed"):
             message += "\n这本书是导入到桌宠书库的副本，副本文件也会删除。"
@@ -2141,11 +2213,84 @@ class EbookShelfDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         ) != QMessageBox.StandardButton.Yes:
             return
-        self.books().remove(book)
+
+        # 1. 如果正在阅读这本书，先关闭阅读器，等待 Qt 释放资源
+        reader = getattr(self.pet, "_ebook_reader", None)
+        if reader is not None:
+            try:
+                reader_book_id = getattr(reader, "book", {}).get("id")
+            except RuntimeError:
+                reader_book_id = None
+                reader = None
+            if reader is not None and reader_book_id == book_id:
+                try:
+                    reader.destroyed.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                self.pet._ebook_reader = None
+                self.pet.dlg_EbookReaderDialog = None
+                try:
+                    reader.close()
+                except RuntimeError:
+                    pass
+                QApplication.processEvents()
+                gc.collect()
+
+        # 2. 用 id 从列表中查找并移除（比依赖对象引用更安全，
+        #    避免 _repair_and_merge_library 中间态导致的不匹配）
+        books = self.books()
+        target = next((b for b in books if b.get("id") == book_id), None)
+        if target is not None:
+            books.remove(target)
+
+        # 3. 删除托管的文件副本（带 GC + 重试 + 重命名降级）
+        cleanup_error = None
+        folder = ""
         if book.get("managed"):
-            folder = os.path.abspath(os.path.join(EBOOK_DIR, str(book.get("id"))))
+            folder = os.path.abspath(os.path.join(EBOOK_DIR, str(book_id)))
             root = os.path.abspath(EBOOK_DIR)
             if os.path.commonpath((root, folder)) == root and os.path.isdir(folder):
-                shutil.rmtree(folder)
+                for attempt in range(5):
+                    try:
+                        shutil.rmtree(folder)
+                        cleanup_error = None
+                        break
+                    except OSError as exc:
+                        cleanup_error = str(exc)
+                        if attempt < 4:
+                            time.sleep(0.1)
+                            QApplication.processEvents()
+                            gc.collect()
+                # 重试仍失败 → 重命名释放原始路径，再试一次
+                if cleanup_error:
+                    try:
+                        temp_dir = folder + ".deleted." + str(int(time.time()))
+                        os.rename(folder, temp_dir)
+                        shutil.rmtree(temp_dir)
+                        cleanup_error = None
+                    except OSError as exc:
+                        cleanup_error = str(exc)
+                        # 重命名后的目录也删不掉 → 写入待清理清单，下次启动再删
+                        try:
+                            if os.path.isdir(temp_dir):
+                                entries = []
+                                if os.path.isfile(_PENDING_CLEANUP_FILE):
+                                    with open(_PENDING_CLEANUP_FILE, "r", encoding="utf-8") as f:
+                                        existing = json.load(f)
+                                    entries = existing if isinstance(existing, list) else [existing]
+                                entries.append({"folder": temp_dir, "original": folder})
+                                os.makedirs(EBOOK_DIR, exist_ok=True)
+                                with open(_PENDING_CLEANUP_FILE, "w", encoding="utf-8") as f:
+                                    json.dump(entries, f, ensure_ascii=False)
+                        except Exception:
+                            pass
+
+        # 4. 保存并刷新
+        self._selected_book_id = None
         save_config(self.pet.config)
         self.refresh_table()
+
+        if cleanup_error:
+            self.pet.show_bubble(
+                f"【normal】书籍已从书架移除，但副本文件暂时无法删除（系统正在占用）。"
+                f"应用下次启动时会自动重试。错误：{cleanup_error}")
