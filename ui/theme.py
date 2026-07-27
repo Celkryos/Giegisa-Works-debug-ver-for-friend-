@@ -228,7 +228,7 @@ QDialog QTimeEdit::drop-down {
 QDialog QComboBox::down-arrow,
 QDialog QDateEdit::down-arrow,
 QDialog QTimeEdit::down-arrow {
-    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCA2Ij48cG9seWdvbiBwb2ludHM9IjAsMCA1LDYgMTAsMCIgZmlsbD0iIzI0NDE1ZiIvPjwvc3ZnPg==);
+    image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAGCAYAAAD68A/GAAAAKElEQVR4nGNQcYz/z0AAgNWQpBCfYrg8jIFNMYocMgdZMYY4ugAuDAB2SjhhqIWulAAAAABJRU5ErkJggg==);
     width: 10px;
     height: 6px;
 }
@@ -247,12 +247,12 @@ QDialog QSpinBox::down-button {
     border-bottom-right-radius: 9px;
 }
 QDialog QSpinBox::up-arrow {
-    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCA2Ij48cG9seWdvbiBwb2ludHM9IjAsNiA1LDAgMTAsNiIgZmlsbD0iIzI0NDE1ZiIvPjwvc3ZnPg==);
+    image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAGCAYAAAD68A/GAAAAJUlEQVR4nGNgIBaoOMb/R8Y4xbEpwqaYAZcidMUM+BQhKyZaIQDs6ybDffugvQAAAABJRU5ErkJggg==);
     width: 10px;
     height: 6px;
 }
 QDialog QSpinBox::down-arrow {
-    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCA2Ij48cG9seWdvbiBwb2ludHM9IjAsMCA1LDYgMTAsMCIgZmlsbD0iIzI0NDE1ZiIvPjwvc3ZnPg==);
+    image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAGCAYAAAD68A/GAAAAKElEQVR4nGNQcYz/z0AAgNWQpBCfYrg8jIFNMYocMgdZMYY4ugAuDAB2SjhhqIWulAAAAABJRU5ErkJggg==);
     width: 10px;
     height: 6px;
 }
