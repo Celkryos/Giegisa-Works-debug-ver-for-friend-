@@ -120,15 +120,17 @@ class CalendarService(QObject):
         self.schedules_changed.emit()
 
     def delete_schedule(self, sched_id):
+        if sched_id is None:
+            return
         sched_id = int(sched_id)
         lst = self.config.get("schedules", [])
         for i, s in enumerate(lst):
             if s.get("id") == sched_id:
                 del lst[i]
-                break
-        self._save()
-        self.schedule_removed.emit(str(sched_id))
-        self.schedules_changed.emit()
+                self._save()
+                self.schedule_removed.emit(str(sched_id))
+                self.schedules_changed.emit()
+                return
 
     def mark_schedule_done(self, sched: dict, d=None, done=True) -> bool:
         d = d or date.today()
@@ -176,15 +178,17 @@ class CalendarService(QObject):
         self.checkins_changed.emit()
 
     def delete_checkin(self, item_id):
+        if item_id is None:
+            return
         item_id = int(item_id)
         lst = self.config.get("checkins", [])
         for i, c in enumerate(lst):
             if c.get("id") == item_id:
                 del lst[i]
-                break
-        self._save()
-        self.checkin_removed.emit(str(item_id))
-        self.checkins_changed.emit()
+                self._save()
+                self.checkin_removed.emit(str(item_id))
+                self.checkins_changed.emit()
+                return
 
     def do_checkin(self, item: dict, d=None, done=True, quiet=False) -> bool:
         d = d or date.today()

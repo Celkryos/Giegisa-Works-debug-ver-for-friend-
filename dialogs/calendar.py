@@ -14,6 +14,7 @@ class CalendarDialog(QDialog):
         super().__init__(parent)
         self.service = service
         self._connected = False
+        self._refresh_pending = False
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -27,10 +28,12 @@ class CalendarDialog(QDialog):
         super().hideEvent(event)
         self._disconnect_service_signals()
         self._connected = False
+        self._refresh_pending = False  # 取消待刷新，避免重新显示后执行过期刷新
 
     def closeEvent(self, event):
         self._disconnect_service_signals()
         self._connected = False
+        self._refresh_pending = False
         super().closeEvent(event)
 
     def _connect_service_signals(self):
@@ -66,11 +69,26 @@ class CalendarDialog(QDialog):
 
     def _on_schedules_changed(self):
         if self.isVisible() and hasattr(self, 'refresh_list'):
-            self.refresh_list()
+            self._defer_refresh()
 
     def _on_checkins_changed(self):
         if self.isVisible() and hasattr(self, 'refresh_list'):
-            self.refresh_list()
+            self._defer_refresh()
+
+    def _defer_refresh(self):
+        """合并同一次事件循环中的多次变更，避免 re-entrant 的 clear + render 链。"""
+        if self._refresh_pending:
+            return
+        self._refresh_pending = True
+        QTimer.singleShot(0, self._do_refresh)
+
+    def _do_refresh(self):
+        self._refresh_pending = False
+        try:
+            if self.isVisible() and hasattr(self, 'refresh_list'):
+                self.refresh_list()
+        except RuntimeError:
+            pass  # C++ 对象已被 WA_DeleteOnClose 销毁，timer 回调自然过期
 
 
 class ScheduleAlertDialog(QDialog):
