@@ -5,10 +5,7 @@
 图片如何裁切，也不需要分别复制样式。
 """
 
-import base64
 import os
-import struct
-import zlib
 
 from PyQt6.QtCore import QEvent, QObject, QPoint, QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap, QRegion
@@ -22,67 +19,6 @@ from PyQt6.QtWidgets import (
     QSizeGrip,
     QWidget,
 )
-
-from config import BASE_DIR
-
-
-def _arrow_down_png():
-    """返回 10×6 向下黑色三角 PNG 的完整内容。"""
-    raw = bytearray()
-    for y in range(6):
-        raw.append(0)
-        for x in range(10):
-            left = x / 9.0
-            yn = y / 5.0
-            raw.extend([0x24, 0x41, 0x5f, 0xff] if yn >= (1 - abs(left - 0.5) * 2) and 0 <= y <= 5
-                       else [0, 0, 0, 0])
-
-    def _chunk(ctype, data):
-        c = ctype + data
-        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
-
-    ihdr = struct.pack(">IIBBBBB", 10, 6, 8, 6, 0, 0, 0)
-    return (b"\x89PNG\r\n\x1a\n"
-            + _chunk(b"IHDR", ihdr)
-            + _chunk(b"IDAT", zlib.compress(bytes(raw)))
-            + _chunk(b"IEND", b""))
-
-
-def _arrow_up_png():
-    """返回 10×6 向上黑色三角 PNG 的完整内容。"""
-    raw = bytearray()
-    for y in range(6):
-        raw.append(0)
-        for x in range(10):
-            left = x / 9.0
-            yn = y / 5.0
-            raw.extend([0x24, 0x41, 0x5f, 0xff] if 1 <= y <= 6 and yn <= abs(left - 0.5) * 2
-                       else [0, 0, 0, 0])
-
-    def _chunk(ctype, data):
-        c = ctype + data
-        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
-
-    ihdr = struct.pack(">IIBBBBB", 10, 6, 8, 6, 0, 0, 0)
-    return (b"\x89PNG\r\n\x1a\n"
-            + _chunk(b"IHDR", ihdr)
-            + _chunk(b"IDAT", zlib.compress(bytes(raw)))
-            + _chunk(b"IEND", b""))
-
-
-def _ensure_arrow_icons():
-    """将箭头 PNG 写入缓存目录，返回 (down_path, up_path)。"""
-    cache_dir = os.path.join(BASE_DIR, ".cache", "theme")
-    os.makedirs(cache_dir, exist_ok=True)
-    down_path = os.path.join(cache_dir, "arrow_down.png")
-    up_path = os.path.join(cache_dir, "arrow_up.png")
-    if not os.path.isfile(down_path):
-        with open(down_path, "wb") as f:
-            f.write(_arrow_down_png())
-    if not os.path.isfile(up_path):
-        with open(up_path, "wb") as f:
-            f.write(_arrow_up_png())
-    return down_path, up_path
 
 
 ICE_GLASS_QSS = r"""
@@ -140,11 +76,7 @@ QDialog QGroupBox::title {
     border-radius: 5px;
 }
 QDialog QLineEdit,
-QDialog QTextEdit,
-QDialog QComboBox,
-QDialog QSpinBox,
-QDialog QDateEdit,
-QDialog QTimeEdit {
+QDialog QTextEdit {
     color: #24415f;
     background-color: rgba(255, 255, 255, 202);
     border: 1px solid rgba(118, 184, 233, 155);
@@ -165,11 +97,7 @@ QDialog QScrollArea {
 }
 QDialog QLineEdit:focus,
 QDialog QTextEdit:focus,
-QDialog QListWidget:focus,
-QDialog QComboBox:focus,
-QDialog QSpinBox:focus,
-QDialog QDateEdit:focus,
-QDialog QTimeEdit:focus {
+QDialog QListWidget:focus {
     border: 2px solid rgba(42, 154, 235, 220);
     background-color: rgba(255, 255, 255, 226);
 }
@@ -280,44 +208,7 @@ QDialog QCheckBox::indicator:checked {
     background-color: rgba(48, 157, 234, 230);
     border: 3px solid rgba(219, 244, 255, 245);
 }
-QDialog QComboBox::drop-down,
-QDialog QDateEdit::drop-down,
-QDialog QTimeEdit::drop-down {
-    width: 24px;
-    border: 0;
-    background-color: rgba(192, 229, 252, 135);
-    border-top-right-radius: 9px;
-    border-bottom-right-radius: 9px;
-}
-QDialog QComboBox::down-arrow,
-QDialog QDateEdit::down-arrow,
-QDialog QTimeEdit::down-arrow {
-    width: 10px;
-    height: 6px;
-}
-QDialog QSpinBox::up-button,
-QDialog QSpinBox::down-button {
-    width: 20px;
-    border: 0;
-    background-color: rgba(192, 229, 252, 135);
-}
-QDialog QSpinBox::up-button {
-    subcontrol-position: top right;
-    border-top-right-radius: 9px;
-}
-QDialog QSpinBox::down-button {
-    subcontrol-position: bottom right;
-    border-bottom-right-radius: 9px;
-}
-QDialog QSpinBox::up-arrow {
-    width: 10px;
-    height: 6px;
-}
-QDialog QSpinBox::down-arrow {
-    width: 10px;
-    height: 6px;
-}
-QToolTip {
+	QToolTip {
     color: #20435d;
     background-color: rgba(245, 252, 255, 245);
     border: 1px solid rgba(83, 164, 222, 210);
@@ -562,24 +453,7 @@ def install_ice_glass_theme(app: QApplication, background_path: str):
     if existing is not None:
         return existing
 
-    down_path, up_path = _ensure_arrow_icons()
-    arrow_qss = (
-        f"QDialog QComboBox::down-arrow,"
-        f"QDialog QDateEdit::down-arrow,"
-        f"QDialog QTimeEdit::down-arrow {{"
-        f"    image: url({down_path});"
-        f"    width: 10px; height: 6px;"
-        f"}}"
-        f"QDialog QSpinBox::up-arrow {{"
-        f"    image: url({up_path});"
-        f"    width: 10px; height: 6px;"
-        f"}}"
-        f"QDialog QSpinBox::down-arrow {{"
-        f"    image: url({down_path});"
-        f"    width: 10px; height: 6px;"
-        f"}}"
-    )
-    app.setStyleSheet(ICE_GLASS_QSS + arrow_qss)
+    app.setStyleSheet(ICE_GLASS_QSS)
     theme = IceGlassTheme(app, background_path)
     app.installEventFilter(theme)
     app._giegisa_ice_theme = theme

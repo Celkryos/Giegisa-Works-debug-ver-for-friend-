@@ -236,29 +236,39 @@ def _parse_epub(path, asset_dir):
 
 def _parse_pdf(path, asset_dir):
     chapters = []
+    # 尝试用 PyMuPDF（fitz）解析，任意异常都 fallback 到 pypdf
+    doc = None
     try:
         import fitz
         doc = fitz.open(path)
-        title = doc.metadata.get("title") or Path(path).stem
-        for index, page in enumerate(doc):
-            images = []
-            for image_index, item in enumerate(page.get_images(full=True)[:12]):
-                try:
-                    data = doc.extract_image(item[0])
-                    out = Path(asset_dir, f"page_{index + 1}_img_{image_index + 1}.{data['ext']}")
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_bytes(data["image"])
-                    images.append(str(out))
-                except Exception:
-                    pass
-            chapters.append({
-                "title": f"第 {index + 1} 页",
-                "text": clean_text(page.get_text("text")),
-                "images": images,
-            })
-        doc.close()
-        return title, chapters, "PDF/PyMuPDF"
-    except ImportError:
+    except Exception:
+        pass
+    if doc is not None:
+        try:
+            meta = doc.metadata
+            title = (meta or {}).get("title") or Path(path).stem
+            for index in range(len(doc)):
+                page = doc.load_page(index)
+                images = []
+                for image_index, item in enumerate(page.get_images(full=True)[:12]):
+                    try:
+                        data = doc.extract_image(item[0])
+                        out = Path(asset_dir, f"page_{index + 1}_img_{image_index + 1}.{data['ext']}")
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        out.write_bytes(data["image"])
+                        images.append(str(out))
+                    except Exception:
+                        pass
+                chapters.append({
+                    "title": f"第 {index + 1} 页",
+                    "text": clean_text(page.get_text("text")),
+                    "images": images,
+                })
+            return title, chapters, "PDF/PyMuPDF"
+        finally:
+            doc.close()
+    # fallback：用 pypdf
+    try:
         from pypdf import PdfReader
         reader = PdfReader(path)
         title = getattr(reader.metadata, "title", "") or Path(path).stem
@@ -269,6 +279,8 @@ def _parse_pdf(path, asset_dir):
                 "images": [],
             })
         return title, chapters, "PDF/pypdf"
+    except Exception as exc:
+        raise ValueError(f"无法解析 PDF（已尝试 PyMuPDF 和 pypdf）：{exc}") from exc
 
 
 def parse_ebook(path, asset_dir, trim=True, repair=True):

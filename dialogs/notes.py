@@ -12,16 +12,16 @@ class EditNoteDialog(QDialog):
         self.setWindowTitle("✏️ 编辑便签")
         self.setWindowFlags(Qt.WindowType.Dialog)
         self.resize(400, 300)
-        self.layout = QVBoxLayout(self)
+        lay = QVBoxLayout(self)
 
         self.text_edit = QTextEdit()
         self.text_edit.setPlainText(note.get("text", ""))
-        self.layout.addWidget(self.text_edit)
+        lay.addWidget(self.text_edit)
 
         btn = QPushButton("💾 保存修改")
         btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px; font-weight: bold;")
         btn.clicked.connect(self.save_edit)
-        self.layout.addWidget(btn)
+        lay.addWidget(btn)
 
     def save_edit(self):
         self.note["text"] = self.text_edit.toPlainText().strip()
@@ -34,25 +34,25 @@ class QuickNoteDialog(QDialog):
         self.pet = parent_pet
         self.setWindowTitle("📝 随手记 (便签)")
         self.setWindowFlags(Qt.WindowType.Tool)
-        self.setWindowOpacity(0.92) 
+        self.setWindowOpacity(0.92)
         self.resize(300, 160)
-        self.layout = QVBoxLayout(self)
-        
+        lay = QVBoxLayout(self)
+
         self.input_box = QTextEdit()
         self.input_box.setPlaceholderText("随时记录一闪而过的灵感或笔记...")
-        self.layout.addWidget(self.input_box)
-        
+        lay.addWidget(self.input_box)
+
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("💾 记录")
         save_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         save_btn.clicked.connect(self.save_note)
-        
+
         mgr_btn = QPushButton("🗂️ 管理便签")
         mgr_btn.clicked.connect(lambda checked=False: self.pet.open_dialog(NotesManagerDialog))
-        
+
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(mgr_btn)
-        self.layout.addLayout(btn_layout)
+        lay.addLayout(btn_layout)
 
     def save_note(self):
         text = self.input_box.toPlainText().strip()
@@ -92,7 +92,7 @@ class NotesManagerDialog(QDialog):
         self.setWindowTitle("🗂️ 便签管理与归档")
         self.setMinimumSize(520, 380)
         self.resize(720, 480)
-        self.layout = QVBoxLayout(self)
+        lay = QVBoxLayout(self)
         self.current_folder = "默认便签"
         
         folder_layout = QHBoxLayout()
@@ -109,7 +109,7 @@ class NotesManagerDialog(QDialog):
         self.sort_combo.addItems(["最新创建优先", "最早创建优先"])
         self.sort_combo.currentIndexChanged.connect(self.refresh_list)
         folder_layout.addWidget(self.sort_combo)
-        self.layout.addLayout(folder_layout)
+        lay.addLayout(folder_layout)
 
         folder_actions = QHBoxLayout()
         
@@ -126,21 +126,21 @@ class NotesManagerDialog(QDialog):
         btn_del_folder.clicked.connect(self.delete_folder)
         folder_actions.addWidget(btn_del_folder)
         folder_actions.addStretch()
-        self.layout.addLayout(folder_actions)
-        
+        lay.addLayout(folder_actions)
+
         self.list_widget = ResponsiveListWidget()
-        self.layout.addWidget(self.list_widget)
-        
+        lay.addWidget(self.list_widget)
+
         btn_layout = QHBoxLayout()
         self.export_btn = QPushButton("💾 导出当前分组")
         self.export_btn.clicked.connect(self.export_notes)
-        
+
         self.import_btn = QPushButton("📂 导入至当前分组")
         self.import_btn.clicked.connect(self.import_notes)
-        
+
         btn_layout.addWidget(self.export_btn)
         btn_layout.addWidget(self.import_btn)
-        self.layout.addLayout(btn_layout)
+        lay.addLayout(btn_layout)
         
         self.refresh_list()
 
