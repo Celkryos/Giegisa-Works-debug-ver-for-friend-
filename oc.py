@@ -7,6 +7,7 @@ import json
 import ctypes
 import winsound
 import base64
+import traceback
 import urllib.request
 import urllib.error
 import calendar as _pycalendar
@@ -23,6 +24,7 @@ from api import gemini_rest_generate, openai_chat
 from threads import ChatThread, TriviaThread, IdleChatThread, RandomEventThread, DataRetrievalThread, ItemRetrievalThread, ImageFetchThread
 from ui import MENU_QSS, ImageBubble, ResponsiveListWidget, DraggableListWidget, ChatInputBox, FocusOverlay, InputDialog, install_ice_glass_theme
 from dialogs import (UserProfileDialog, MoodDialog, ScheduleAlertDialog, CheckinAlertDialog, EditScheduleDialog, EditCheckinDialog, ScheduleDialog, DayDetailDialog, MiniCalendarDialog, CheckinDialog, StatsDialog, CollectionManagerDialog, EditNoteDialog, QuickNoteDialog, NotesManagerDialog, DistractionSettingsDialog, AutoEventSettingsDialog, RandomEventDialog, StoreDialog, ApiSettingsDialog, AppearanceDialog, FocusDialog, MemorySettingsDialog, HistoryDialog, EbookShelfDialog)
+from dialogs.common import show_warning
 
 _EMOTION_TOKEN_RE = re.compile(
     r"[*_]*[\[【\(（\{]\s*(normal|shy|angry|dark)\s*[\]】\)）\}][*_]*",
@@ -101,9 +103,11 @@ class DesktopPet(QWidget):
         self._bubble_hold_until = 0.0
         self._bubble_dispatch_pending = False
 
-        # 启动时清理上次残留的电子书副本
+        # 启动时清理上次残留的电子书副本与不再被引用的历史目录
         from dialogs.ebook import _cleanup_pending_ebook_deletions
-        QTimer.singleShot(0, _cleanup_pending_ebook_deletions)
+        QTimer.singleShot(
+            0, lambda: _cleanup_pending_ebook_deletions(
+                self.config.get("ebook_library", [])))
 
         self.init_images()
         self.init_ui()
@@ -140,7 +144,7 @@ class DesktopPet(QWidget):
             warning_text = "\n".join(dict.fromkeys(LOAD_WARNINGS))
             QTimer.singleShot(
                 800,
-                lambda text=warning_text: QMessageBox.warning(
+                lambda text=warning_text: show_warning(
                     self, "存档自动恢复提示", text))
 
     def on_summary_updated(self, summary):
@@ -1355,6 +1359,10 @@ class DesktopPet(QWidget):
         self.handle_api_reply(text, type_interval)
 
 if __name__ == "__main__":
+    # PyQt6 对槽函数里未捕获的异常默认调用 qFatal() 直接终止进程，
+    # 表现为“闪退”且无任何日志。换成打印 traceback 并继续运行，
+    # 单个功能的异常不再拖垮整个桌宠。
+    sys.excepthook = lambda exc_type, exc, tb: traceback.print_exception(exc_type, exc, tb)
     app = QApplication(sys.argv)
     install_ice_glass_theme(app, UI_BACKGROUND_FILE)
     pet = DesktopPet()

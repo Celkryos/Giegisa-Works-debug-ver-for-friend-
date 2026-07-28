@@ -177,19 +177,21 @@ class MoodDialog(QDialog):
         self.pet.session_mood = 50.0
         self.pet.update_idle_face()
         self.update_display()
-        QMessageBox.information(self, "已重置", "单次沟通情绪已归零。")
+        show_info(self, "已重置", "单次沟通情绪已归零。")
 
     def reset_total(self):
-        reply = question_box(self, '确认', '确定要将长期羁绊重置为初见状态(50)吗？', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            self.pet.total_mood = 50.0
-            self.pet.config["total_mood"] = 50.0
-            save_config(self.pet.config)
-            self.pet.update_idle_face()
-            self.update_display()
-            if hasattr(self, 'blush_btn') and self.pet.total_mood < 76:
-                self.blush_btn.hide()
-            QMessageBox.information(self, "已重置", "长期羁绊已重置为出厂初始状态。")
+        ask_yes_no(self, '确认', '确定要将长期羁绊重置为初见状态(50)吗？',
+                   self._do_reset_total)
+
+    def _do_reset_total(self):
+        self.pet.total_mood = 50.0
+        self.pet.config["total_mood"] = 50.0
+        save_config(self.pet.config)
+        self.pet.update_idle_face()
+        self.update_display()
+        if hasattr(self, 'blush_btn') and self.pet.total_mood < 76:
+            self.blush_btn.hide()
+        show_info(self, "已重置", "长期羁绊已重置为出厂初始状态。")
 
 class DistractionSettingsDialog(QDialog):
     """【新增】精细化摸鱼拦截设置面板"""

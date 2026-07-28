@@ -58,6 +58,8 @@ class FakePet(QWidget):
             }
         ]
         self.spoken_dates = []
+        self.calendar_service = oc.CalendarService(self.config)
+        self.calendar_service.ai_speech_needed.connect(self.inject_system_event)
 
     def refresh_dialogs(self, *args):
         pass
@@ -171,13 +173,13 @@ def main():
     oc.install_ice_glass_theme(app, oc.UI_BACKGROUND_FILE)
     pet = FakePet()
     dialogs = [
-        oc.EditScheduleDialog(pet),
-        oc.EditCheckinDialog(pet),
-        oc.ScheduleDialog(pet),
-        oc.DayDetailDialog(pet, date(2026, 7, 24)),
-        oc.MiniCalendarDialog(pet),
-        oc.CheckinDialog(pet),
-        oc.StatsDialog(pet),
+        oc.EditScheduleDialog(pet.calendar_service, pet),
+        oc.EditCheckinDialog(pet.calendar_service, pet),
+        oc.ScheduleDialog(pet.calendar_service, pet),
+        oc.DayDetailDialog(pet.calendar_service, pet, date(2026, 7, 24)),
+        oc.MiniCalendarDialog(pet.calendar_service, pet),
+        oc.CheckinDialog(pet.calendar_service, pet),
+        oc.StatsDialog(pet.calendar_service, pet),
     ]
     for dialog in dialogs:
         dialog.show()
@@ -218,6 +220,15 @@ def main():
     # 主桌宠也要能完整创建；用内存配置隔离，避免测试改动真实 config/history。
     old_loader = oc.load_config
     old_saver = oc.save_config
+    import core.calendar_service as calendar_service_module
+    import dialogs.ebook as ebook_dialog_module
+    old_service_saver = calendar_service_module.save_config
+    old_ebook_cleanup = ebook_dialog_module._cleanup_pending_ebook_deletions
+    # CalendarService 持有自己的 save_config 引用，不 mock 会写真实 config.json。
+    calendar_service_module.save_config = lambda *args, **kwargs: True
+    # DesktopPet 启动时会按 config 书库列表清扫 ebook_library 孤儿目录；
+    # 测试使用内存假配置，必须打桩，避免误删真实书库文件。
+    ebook_dialog_module._cleanup_pending_ebook_deletions = lambda *args, **kwargs: None
     fake_config = json.loads(json.dumps(oc.DEFAULT_CONFIG))
     fake_config["last_sign_in"] = date.today().strftime("%Y-%m-%d")
     fake_config["api_type"] = "openai"
@@ -311,6 +322,8 @@ def main():
     finally:
         oc.load_config = old_loader
         oc.save_config = old_saver
+        calendar_service_module.save_config = old_service_saver
+        ebook_dialog_module._cleanup_pending_ebook_deletions = old_ebook_cleanup
         for key, value in old_proxy_env.items():
             if value is None:
                 os.environ.pop(key, None)
