@@ -22,7 +22,7 @@ from core.utils import *
 from core.calendar_service import CalendarService
 from api import gemini_rest_generate, openai_chat
 from threads import ChatThread, TriviaThread, IdleChatThread, RandomEventThread, DataRetrievalThread, ItemRetrievalThread, ImageFetchThread
-from ui import MENU_QSS, ImageBubble, ResponsiveListWidget, DraggableListWidget, ChatInputBox, FocusOverlay, InputDialog, install_ice_glass_theme
+from ui import MENU_QSS, ImageBubble, ResponsiveListWidget, DraggableListWidget, ChatInputBox, FocusOverlay, InputDialog, ChatBubbleWindow, install_ice_glass_theme
 from dialogs import (UserProfileDialog, MoodDialog, ScheduleAlertDialog, CheckinAlertDialog, EditScheduleDialog, EditCheckinDialog, ScheduleDialog, DayDetailDialog, MiniCalendarDialog, CheckinDialog, StatsDialog, CollectionManagerDialog, EditNoteDialog, QuickNoteDialog, NotesManagerDialog, DistractionSettingsDialog, AutoEventSettingsDialog, RandomEventDialog, StoreDialog, ApiSettingsDialog, AppearanceDialog, FocusDialog, MemorySettingsDialog, HistoryDialog, EbookShelfDialog)
 from dialogs.common import show_warning
 
@@ -134,6 +134,7 @@ class DesktopPet(QWidget):
         self._anchor_bottom = None
         self._anchor_pending = False
         self._anchor_applying = False
+        self._bubble_sync_pending = False
 
         # 启动时清理上次残留的电子书副本与不再被引用的历史目录
         from dialogs.ebook import _cleanup_pending_ebook_deletions
@@ -396,6 +397,7 @@ class DesktopPet(QWidget):
         # 改为：锚点只记录、移动推迟到 singleShot(0)，与缩放在同一轮
         # 事件循环里生效、同一帧绘制，图像彻底不动。
         super().resizeEvent(event)
+        self._schedule_bubble_sync()
         if self.is_following:
             # 拖拽中不锚定，只让锚点跟随当前几何，松手后从这里继续。
             self._sync_anchor_from_geometry()
@@ -407,6 +409,50 @@ class DesktopPet(QWidget):
         if not getattr(self, "_anchor_applying", False):
             self._sync_anchor_from_geometry()
         super().moveEvent(event)
+        # 气泡是独立子窗口，本体移动时同步跟随
+        self._sync_bubble_position()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        # 气泡是独立子窗口：部分平台下本体隐藏不会级联隐藏它，显式处理。
+        if getattr(self, "chat_bubble", None) and self.chat_bubble.isVisible():
+            self._bubble_was_visible = True
+            self.chat_bubble.hide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if getattr(self, "_bubble_was_visible", False):
+            self._bubble_was_visible = False
+            self.chat_bubble.show()
+
+    def _sync_bubble_position(self):
+        """把气泡窗口贴到本体图像正上方（底边中点对齐本体顶边中点）。"""
+        bubble = getattr(self, "chat_bubble", None)
+        if bubble is None or not bubble.isVisible():
+            return
+        # 本体上方空间不足的极限情况：给气泡设高度上限并重算
+        # （先 setMaximumHeight 再 adjustSize，缩放才会被上限夹住；
+        # 内容被截断时完整文本可在记忆档案中查看）。
+        screen = (QApplication.screenAt(self.geometry().center())
+                  or QApplication.primaryScreen())
+        avail_top = screen.availableGeometry().top()
+        space = max(60, (self.y() - 6) - avail_top)
+        target_max = space if bubble.sizeHint().height() > space else 16777215  # QWIDGETSIZE_MAX
+        if bubble.maximumHeight() != target_max:
+            bubble.setMaximumHeight(target_max)
+            bubble.adjustSize()
+        cx = self.x() + self.width() // 2
+        bubble.move(cx - bubble.width() // 2, self.y() - 6 - bubble.height())
+
+    def _schedule_bubble_sync(self):
+        if getattr(self, "_bubble_sync_pending", False):
+            return
+        self._bubble_sync_pending = True
+        QTimer.singleShot(0, self._flush_bubble_sync)
+
+    def _flush_bubble_sync(self):
+        self._bubble_sync_pending = False
+        self._sync_bubble_position()
 
     def _sync_anchor_from_geometry(self):
         self._anchor_cx = self.x() + self.width() / 2
@@ -538,15 +584,11 @@ class DesktopPet(QWidget):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
 
-        # 1. 气泡层
-        self.chat_bubble = QLabel("")
-        self.chat_bubble.setWordWrap(True)
-        self.chat_bubble.setTextFormat(Qt.TextFormat.RichText)
-        self.chat_bubble.setMinimumHeight(30)
-        self.chat_bubble.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding)
+        # 1. 气泡层（独立子窗口：本体窗口尺寸彻底恒定，气泡自己向上扩展）
+        if not hasattr(self, 'chat_bubble') or self.chat_bubble is None:
+            self.chat_bubble = ChatBubbleWindow(self)
         self.apply_bubble_style()
         self.chat_bubble.hide()
-        self.main_layout.addWidget(self.chat_bubble)
 
         # 2. 剪贴板识别按钮 (头顶)
         self.analyze_btn = QPushButton("✨ 识别剪贴板", self)
@@ -1224,6 +1266,7 @@ class DesktopPet(QWidget):
         # 先清空再显示：否则气泡会带着上一轮回复的旧文本闪现一帧。
         self.chat_bubble.setText("")
         self.chat_bubble.show()
+        self._sync_bubble_position()
         self.speak_timer.start(200)
         interval = self._pending_type_interval
         self._pending_type_interval = None
@@ -1239,8 +1282,8 @@ class DesktopPet(QWidget):
                     return
             self.display_text += self.full_text[self.text_index]
             self.chat_bubble.setText(self.display_text)
-            # 外层 adjustSize 会连带更新气泡；不再为每个字重复做两次布局。
-            self.adjustSize()
+            # 气泡是独立子窗口，只调整它自己；本体窗口尺寸恒定。
+            self.chat_bubble.adjustSize()
             self.text_index += 1
         else:
             self.finish_typing()
