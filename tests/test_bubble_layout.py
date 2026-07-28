@@ -80,6 +80,32 @@ def main():
             assert abs(a[0] - b[0]) <= 2, (a, b)
             assert abs(a[1] - b[1]) <= 2, (a, b)
 
+        # ---- 1b. 延迟锚定：resize 不同步移动窗口，锚点在事件循环中统一生效 ----
+        pet.chat_bubble.hide()
+        pet.adjustSize()
+        app.processEvents()
+        pet.move(500, 300)
+        app.processEvents()
+        base = _image_anchor(pet)
+        y_before = pet.y()
+        pet.chat_bubble.setText("延迟锚定测试，" * 10)
+        pet.chat_bubble.show()
+        pet.adjustSize()
+        assert pet.y() == y_before, "resizeEvent 里不应再同步移动窗口（跳帧根因）"
+        app.processEvents()
+        now = _image_anchor(pet)
+        assert abs(base[0] - now[0]) <= 2 and abs(base[1] - now[1]) <= 2, (base, now)
+        # 隐藏→再增长循环后锚点依旧稳定
+        pet.chat_bubble.hide()
+        pet.adjustSize()
+        app.processEvents()
+        pet.chat_bubble.setText("第二轮增长，" * 14)
+        pet.chat_bubble.show()
+        pet.adjustSize()
+        app.processEvents()
+        now2 = _image_anchor(pet)
+        assert abs(base[0] - now2[0]) <= 2 and abs(base[1] - now2[1]) <= 2, (base, now2)
+
         # ---- 2. 夹持：贴屏幕顶部时，超高气泡也不顶出屏幕 ----
         pet.move(500, 0)
         pet.chat_bubble.setText("顶部长文本，" * 60)

@@ -129,6 +129,11 @@ class DesktopPet(QWidget):
         self._pending_type_interval = None
         self._bubble_hold_until = 0.0
         self._bubble_dispatch_pending = False
+        # 窗口锚点（气泡增长时保持图像不动的基准），见 resizeEvent/_apply_anchor
+        self._anchor_cx = None
+        self._anchor_bottom = None
+        self._anchor_pending = False
+        self._anchor_applying = False
 
         # 启动时清理上次残留的电子书副本与不再被引用的历史目录
         from dialogs.ebook import _cleanup_pending_ebook_deletions
@@ -386,25 +391,50 @@ class DesktopPet(QWidget):
             show=False)
 
     def resizeEvent(self, event):
-        # 以“窗口底边中点”为锚：气泡文字增长时向上、向两侧对称扩展，
-        # 桌宠图像与输入框在屏幕上的位置保持不动（仅用户拖动可移动）。
-        # 拖拽中不做锚定，避免与鼠标拖拽打架（坐标飘动旧疾）。
-        if event.oldSize().width() > 0 and not self.is_following:
-            new_size = event.size()
-            anchor_cx = self.x() + event.oldSize().width() / 2
-            anchor_bottom = self.y() + event.oldSize().height()
-            new_x = round(anchor_cx - new_size.width() / 2)
-            new_y = round(anchor_bottom - new_size.height())
-            # 只在气泡顶要超出“窗口所在屏幕”的顶边时才上抬，其余方向
-            # 一概不动——否则桌宠停在屏幕底边/副屏时会被夹持逻辑来回
-            # 拉扯，表现为上下左右跳变。
-            screen = (QApplication.screenAt(self.geometry().center())
-                      or QApplication.primaryScreen())
-            top = screen.availableGeometry().top()
-            if new_y < top:
-                new_y = top
-            self.move(new_x, new_y)
+        # 气泡在图像上方：文字增行时窗口先长高、图像被瞬间顶下去一帧，
+        # 若在这里同步 move 回拉，Windows 会分两帧绘制，肉眼可见“跳一下”。
+        # 改为：锚点只记录、移动推迟到 singleShot(0)，与缩放在同一轮
+        # 事件循环里生效、同一帧绘制，图像彻底不动。
         super().resizeEvent(event)
+        if self.is_following:
+            # 拖拽中不锚定，只让锚点跟随当前几何，松手后从这里继续。
+            self._sync_anchor_from_geometry()
+            return
+        self._schedule_anchor()
+
+    def moveEvent(self, event):
+        # 窗口被（用户拖拽/程序）移动时更新锚点；锚定自身引起的移动除外。
+        if not getattr(self, "_anchor_applying", False):
+            self._sync_anchor_from_geometry()
+        super().moveEvent(event)
+
+    def _sync_anchor_from_geometry(self):
+        self._anchor_cx = self.x() + self.width() / 2
+        self._anchor_bottom = self.y() + self.height()
+
+    def _schedule_anchor(self):
+        if getattr(self, "_anchor_pending", False):
+            return
+        self._anchor_pending = True
+        QTimer.singleShot(0, self._apply_anchor)
+
+    def _apply_anchor(self):
+        self._anchor_pending = False
+        if getattr(self, "_anchor_bottom", None) is None:
+            self._sync_anchor_from_geometry()
+            return
+        # 以“窗口底边中点”为锚：气泡向上、向两侧扩展，图像原地不动。
+        new_x = round(self._anchor_cx - self.width() / 2)
+        new_y = round(self._anchor_bottom - self.height())
+        # 仅当气泡顶要超出当前屏幕顶边时才上抬，其余方向一概不动。
+        screen = (QApplication.screenAt(self.geometry().center())
+                  or QApplication.primaryScreen())
+        top = screen.availableGeometry().top()
+        if new_y < top:
+            new_y = top
+        self._anchor_applying = True
+        self.move(new_x, new_y)
+        self._anchor_applying = False
 
     def check_daily_signin(self):
         today = str(date.today())
