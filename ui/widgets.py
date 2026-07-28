@@ -39,9 +39,15 @@ class ImageBubble(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if Qt.MouseButton.LeftButton and self.is_following:
+        if self.is_following and (event.buttons() & Qt.MouseButton.LeftButton):
             self.move(event.globalPosition().toPoint() - self.mouse_drag_pos)
             event.accept()
+
+    def mouseReleaseEvent(self, event):
+        # 松开即复位拖拽状态，避免陈旧的 mouse_drag_pos 把窗口“吸”走。
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_following = False
+        super().mouseReleaseEvent(event)
 
     def load_image(self, data):
         pixmap = QPixmap()
@@ -218,9 +224,15 @@ class FocusOverlay(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if Qt.MouseButton.LeftButton and self.is_following:
+        if self.is_following and (event.buttons() & Qt.MouseButton.LeftButton):
             self.move(event.globalPosition().toPoint() - self.mouse_drag_pos)
             event.accept()
+
+    def mouseReleaseEvent(self, event):
+        # 松开即复位拖拽状态，避免陈旧的 mouse_drag_pos 把窗口“吸”走。
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_following = False
+        super().mouseReleaseEvent(event)
 
     def update_display(self):
         if not self.pet.is_focus_mode:

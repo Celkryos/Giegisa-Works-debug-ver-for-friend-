@@ -292,43 +292,71 @@ class DesktopPet(QWidget):
             self.commented_media_title = "" # 关掉开关时也清空深度记忆
             return
 
+        title = self._detect_media_title()
+        if not title:
+            # 【修复核心】：切出媒体软件时，只重置当前状态，绝对不碰 commented_media_title！
+            # 这样就算你中间切出去聊微信，再切回同一个视频，Gisa 也记得自己已经吐槽过了，绝不废话。
+            self.last_media_title = ""
+            self.media_start_time = 0
+            return
+
+        if title != self.last_media_title:
+            # 标题变动，锁定当前曲目，开始1秒计时
+            self.last_media_title = title
+            self.media_start_time = time.time()
+        elif self.media_start_time > 0 and (time.time() - self.media_start_time >= 1):
+            # 满1秒后，检查是否已经对"这个特定标题"发表过见解
+            self.media_start_time = 0 # 无论发不发，先锁住计时器
+
+            if title != self.commented_media_title:
+                # 只有当标题不等于已评价过的标题时，才发送指令
+                self.commented_media_title = title # 把它加入已评价备忘录
+                self.send_msg(f"【系统后台强制指令：用户正在播放：{title}。请结合你的人物设定以及精准检索到的深度延伸信息（作者/风格/相关文化/其他等），过滤无意义噪声，关注核心曲目或视频标题，中立地发表一下你的简短评价和人性化态度。】", hidden=True)
+
+    def _detect_media_title(self):
+        """识别用户正在播放的媒体标题。
+
+        优先读系统媒体会话（GSMTC）：浏览器、网易云、QQ 音乐等应用在
+        后台播放时也能拿到曲目信息（需要可选依赖 winsdk）；没有可用
+        会话时回退到“前台窗口标题 + 关键词”识别。
+        """
+        try:
+            from core.media_sessions import get_playing_media
+            sessions = get_playing_media()
+        except Exception:
+            sessions = []
+        if sessions:
+            best = sessions[0]
+            artist = best.get("artist") or ""
+            source = best.get("app") or ""
+            artist_part = f" - {artist}" if artist else ""
+            source_part = f"（{source} 后台播放）" if source else ""
+            return f"{best['title']}{artist_part}{source_part}"
+
         hwnd = ctypes.windll.user32.GetForegroundWindow()
-        if not hwnd: return
+        if not hwnd: return ""
         title_len = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
-        if title_len == 0: return
+        if title_len == 0: return ""
 
         buf = ctypes.create_unicode_buffer(title_len + 1)
         ctypes.windll.user32.GetWindowTextW(hwnd, buf, title_len + 1)
         title = buf.value
 
-        if not title: return
+        if not title: return ""
 
         media_list = ["网易云", "qq音乐", "酷狗音乐", "alger", "folia", "爱奇艺", "抖音", "快手", "小红书", "bilibili", "acfun", "youtube", "music", "video", "anime", "player", "播放", "音乐", "动画", "视频"]
 
         if any(keyword.lower() in title.lower() for keyword in media_list):
-            if title != self.last_media_title:
-                # 标题变动，锁定当前曲目，开始1秒计时
-                self.last_media_title = title
-                self.media_start_time = time.time()
-            elif self.media_start_time > 0 and (time.time() - self.media_start_time >= 1):
-                # 满1秒后，检查是否已经对"这个特定标题"发表过见解
-                self.media_start_time = 0 # 无论发不发，先锁住计时器
-
-                if title != self.commented_media_title:
-                    # 只有当标题不等于已评价过的标题时，才发送指令
-                    self.commented_media_title = title # 把它加入已评价备忘录
-                    self.send_msg(f"【系统后台强制指令：用户正在播放：{title}。请结合你的人物设定以及精准检索到的深度延伸信息（作者/风格/相关文化/其他等），过滤无意义噪声，关注核心曲目或视频标题，中立地发表一下你的简短评价和人性化态度。】", hidden=True)
-        else:
-            # 【修复核心】：切出媒体软件时，只重置当前状态，绝对不碰 commented_media_title！
-            # 这样就算你中间切出去聊微信，再切回同一个视频，Gisa 也记得自己已经吐槽过了，绝不废话。
-            self.last_media_title = ""
-            self.media_start_time = 0
+            return title
+        return ""
 
     def handle_api_lag(self, elapsed):
         self.inject_system_event("系统：检测到API响应卡顿", f"【angry】网络传输延迟达到了 {elapsed:.1f} 秒... 这种低效的数据链路让我非常烦躁。")
 
     def resizeEvent(self, event):
-        if event.oldSize().height() > 0:
+        # 打字期间气泡长高会把窗口向上顶（保持“脚”原地）。拖拽中不做这个
+        # 锚定位移，否则窗口在“锚定位置”和“拖拽位置”之间打架、表现为坐标飘动。
+        if event.oldSize().height() > 0 and not self.is_following:
             self.move(self.x(), self.y() - (event.size().height() - event.oldSize().height()))
         super().resizeEvent(event)
 
@@ -1142,6 +1170,9 @@ class DesktopPet(QWidget):
     def mouseReleaseEvent(self, event):
         self.idle_seconds = 0
         if event.button() == Qt.MouseButton.LeftButton:
+            # 拖动状态必须在松开时复位：否则 is_following 一直为真，
+            # 之后任意按键移动都会拿陈旧的 mouse_drag_pos 把窗口“吸”过去。
+            self.is_following = False
             if self.is_typing and self.can_skip:
                 self.display_text = self.full_text
                 self.finish_typing()
@@ -1166,7 +1197,9 @@ class DesktopPet(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if Qt.MouseButton.LeftButton and self.is_following:
+        # 原来的判断写成了 `Qt.MouseButton.LeftButton and ...`（常量恒真），
+        # 等于只检查 is_following；必须检查事件里实际按着的按钮。
+        if self.is_following and (event.buttons() & Qt.MouseButton.LeftButton):
             self.move(event.globalPosition().toPoint() - self.mouse_drag_pos)
             event.accept()
 
