@@ -29,13 +29,14 @@ from PyQt6.QtWidgets import (
     QTextEdit, QToolButton, QVBoxLayout, QWidget, QInputDialog,
 )
 
-from config import BASE_DIR, save_config
+from config import BASE_DIR, LOAD_WARNINGS, save_config
 from core.ebook import (
     IMAGE_OBJECT, SUPPORTED_EBOOKS, clean_text, decode_bytes, html_to_text, load_cache,
     parse_ebook, save_cache,
 )
 from core.utils import new_id, checkin_done_on
-from .common import question_box, input_text_box, input_multi_text_box
+from .common import (ask_multiline, ask_text, ask_yes_no,
+                     show_critical, show_info, show_warning)
 
 EBOOK_DIR = os.path.join(BASE_DIR, "ebook_library")
 _PENDING_CLEANUP_FILE = os.path.join(EBOOK_DIR, "_pending_cleanup.json")
@@ -144,12 +145,14 @@ def _schedule_reboot_delete(path):
     kernel32.MoveFileExW(path, None, MOVEFILE_DELAY_UNTIL_REBOOT)
 
 
-def _cleanup_pending_ebook_deletions():
-    """启动时清理上次未能删除的电子书副本目录。
+def _cleanup_pending_ebook_deletions(library=None):
+    """启动时清理电子书书库中的历史残留。
 
     两阶段清理：
     1. 处理 _pending_cleanup.json 中登记的目录
     2. 扫描 EBOOK_DIR 下所有 *.deleted.* 目录（兜底，防止标记文件写入失败的残留）
+    3. 若传入当前书籍列表，再清理不再被任何书籍引用的孤儿目录
+       （旧版“相同书籍合并”或删除失败留下的空壳、assets 图片残余）
     """
     marker = _PENDING_CLEANUP_FILE
     targets = []  # (path, source) tuples
@@ -209,6 +212,45 @@ def _cleanup_pending_ebook_deletions():
                 json.dump(remaining, f, ensure_ascii=False)
         except Exception:
             pass
+
+    # ---- 阶段 3：孤儿目录清扫 ----
+    if library is not None:
+        _sweep_orphan_book_dirs(library)
+
+
+def _sweep_orphan_book_dirs(library):
+    """清理 EBOOK_DIR 下不再被任何书籍记录引用的目录。
+
+    只处理“长得像书籍目录”的文件夹（含 book.* 文件、assets 子目录，
+    或为空目录），避免误删用户自己放进去的其他文件。
+    """
+    if not os.path.isdir(EBOOK_DIR):
+        return
+    if LOAD_WARNINGS:
+        # 配置未能干净加载（可能回退成默认空书库）。此时书库列表不可信，
+        # 绝不能据此清理目录，否则会把用户真实书籍当成孤儿误删。
+        return
+    live_ids = {str(book.get("id")) for book in library
+                if isinstance(book, dict) and book.get("id")}
+    root = os.path.abspath(EBOOK_DIR)
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for name in names:
+        folder = os.path.join(root, name)
+        if not os.path.isdir(folder) or name in live_ids or ".deleted." in name:
+            continue
+        try:
+            entries = os.listdir(folder)
+        except OSError:
+            continue
+        looks_like_book = (
+            not entries
+            or "assets" in entries
+            or any(entry.lower().startswith("book.") for entry in entries))
+        if looks_like_book:
+            _force_delete_dir(folder)
 
 
 class ReaderTextBrowser(QTextBrowser):
@@ -751,7 +793,7 @@ class EbookReaderDialog(QDialog):
     def _load_book(self):
         path = _relocate_managed_book(self.book)
         if not os.path.isfile(path):
-            QMessageBox.warning(
+            show_warning(
                 self, "需要重新定位",
                 "原书库路径已经失效。请选择同一本电子书重新关联；"
                 "原有阅读进度、书签和批注都会保留。")
@@ -765,7 +807,7 @@ class EbookReaderDialog(QDialog):
             expected = self.book.get("source_hash", "")
             actual = _file_fingerprint(replacement)
             if expected and actual != expected:
-                QMessageBox.critical(
+                show_critical(
                     self, "文件不一致",
                     "所选文件与原书籍内容不一致，已取消关联，旧笔记和进度没有改动。")
                 QTimer.singleShot(0, self.close)
@@ -797,7 +839,7 @@ class EbookReaderDialog(QDialog):
                 self.parsed["repair_sentences"] = repair
                 save_cache(self.parsed, asset_dir)
         except Exception as exc:
-            QMessageBox.critical(self, "解析失败", str(exc))
+            show_critical(self, "解析失败", str(exc))
             QTimer.singleShot(0, self.close)
             return
         finally:
@@ -1320,9 +1362,10 @@ class EbookReaderDialog(QDialog):
         if not selected:
             self.pet.show_bubble("【normal】先选中要批注的文字。")
             return
-        note, ok = input_multi_text_box(self, "添加批注", "批注内容：")
-        if not ok:
-            return
+        ask_multiline(self, "添加批注", "批注内容：",
+                      lambda note: self._save_annotation(selected, note))
+
+    def _save_annotation(self, selected, note):
         start, end, text = selected
         self.book.setdefault("annotations", []).append({
             "id": new_id(), "type": "note", "start": start, "end": end,
@@ -1415,9 +1458,9 @@ class EbookReaderDialog(QDialog):
         if kind == "bookmark":
             mark = next((m for m in self.book.get("bookmarks", []) if m.get("id") == mark_id), None)
             if mark:
-                title, ok = input_text_box(self, "修改书签", "书签名称：", text=mark.get("title", "书签"))
-                if ok and title.strip():
-                    mark["title"] = title.strip()
+                ask_text(self, "修改书签", "书签名称：",
+                         lambda title: self._save_mark_title(mark, title),
+                         text=mark.get("title", "书签"))
         else:
             mark = next((m for m in self.book.get("annotations", []) if m.get("id") == mark_id), None)
             if mark:
@@ -1426,11 +1469,19 @@ class EbookReaderDialog(QDialog):
                         "【normal】这是纯高亮，没有批注文字。"
                         "如需改色请使用“修改选中高亮 / 批注颜色”。")
                     return
-                note, ok = input_multi_text_box(
-                    self, "修改批注", "批注内容：", text=mark.get("note", ""))
-                if not ok:
-                    return
-                mark["note"] = note.strip()
+                ask_multiline(self, "修改批注", "批注内容：",
+                              lambda note: self._save_mark_note(mark, note),
+                              text=mark.get("note", ""))
+
+    def _save_mark_title(self, mark, title):
+        if title.strip():
+            mark["title"] = title.strip()
+            self._refresh_marks()
+            self.show_page()
+            save_config(self.pet.config)
+
+    def _save_mark_note(self, mark, note):
+        mark["note"] = note.strip()
         self._refresh_marks()
         self.show_page()
         save_config(self.pet.config)
@@ -1509,7 +1560,7 @@ class EbookReaderDialog(QDialog):
         if not self.parsed:
             return
         if not self._llm_configured():
-            QMessageBox.information(
+            show_info(
                 self, "尚未配置大模型",
                 "“让 Gisa 谈谈选中文字”会调用当前设置的大模型接口。"
                 "请先在“核心数据与接口”中填写 API Key 和模型名称。")
@@ -2251,9 +2302,12 @@ class EbookShelfDialog(QDialog):
         book = self.selected_book()
         if not book:
             return
-        category, ok = input_text_box(
-            self, "书架分类", "分类名称：", text=book.get("category", "默认书架"))
-        if ok and category.strip():
+        ask_text(self, "书架分类", "分类名称：",
+                 lambda category: self._apply_category(book, category),
+                 text=book.get("category") or "默认书架")
+
+    def _apply_category(self, book, category):
+        if category.strip():
             book["category"] = category.strip()
             save_config(self.pet.config)
             self.refresh_table()
@@ -2290,12 +2344,10 @@ class EbookShelfDialog(QDialog):
             message += "\n这本书是导入到桌宠书库的副本，副本文件也会删除。"
         else:
             message += "\n原文件夹中的电子书不会被删除。"
-        if question_box(
-                self, "确认删除", message,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        ) != QMessageBox.StandardButton.Yes:
-            return
+        ask_yes_no(self, "确认删除", message,
+                   lambda: self._do_delete_book(book_id, bool(book.get("managed"))))
 
+    def _do_delete_book(self, book_id, managed):
         # 1. 如果正在阅读这本书，先关闭阅读器，等待 Qt 释放资源
         reader = getattr(self.pet, "_ebook_reader", None)
         if reader is not None:
@@ -2328,7 +2380,7 @@ class EbookShelfDialog(QDialog):
         # 3. 删除托管的文件副本（带 GC + 重试 + 重命名降级）
         cleanup_error = None
         folder = ""
-        if book.get("managed"):
+        if managed:
             folder = os.path.abspath(os.path.join(EBOOK_DIR, str(book_id)))
             root = os.path.abspath(EBOOK_DIR)
             if os.path.commonpath((root, folder)) == root and os.path.isdir(folder):

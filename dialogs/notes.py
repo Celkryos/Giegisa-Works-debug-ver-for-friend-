@@ -159,65 +159,75 @@ class NotesManagerDialog(QDialog):
         self.refresh_list()
 
     def new_folder(self):
-        dlg = InputDialog("新建便签分组", "请输入分组名称:", self)
-        if dlg.exec():
-            text = dlg.get_text()
-            if text and text not in self.pet.config["note_folders"]:
-                self.pet.config["note_folders"].append(text)
-                save_config(self.pet.config)
-                self.update_folder_combo()
-                self.folder_combo.setCurrentText(text)
+        ask_text(self, "新建便签分组", "请输入分组名称:", self._add_folder)
+
+    def _add_folder(self, text):
+        text = text.strip()
+        if text and text not in self.pet.config["note_folders"]:
+            self.pet.config["note_folders"].append(text)
+            save_config(self.pet.config)
+            self.update_folder_combo()
+            self.folder_combo.setCurrentText(text)
 
     def delete_folder(self):
         """删除便签分组并将内部便签转移至默认区域"""
         if self.current_folder == "默认便签":
-            QMessageBox.warning(self, "禁止操作", "【默认便签】为系统基础分组，无法被删除！")
+            show_warning(self, "禁止操作", "【默认便签】为系统基础分组，无法被删除！")
             return
-            
-        reply = question_box(self, '确认删除', f'确定要删除分组【{self.current_folder}】吗？\n为防止数据丢失，该分组下的所有便签将被安全转移至【默认便签】！', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            # 1. 遍历并转移该分类下的便签
-            for note in self.pet.config.get("notes", []):
-                if note.get("folder") == self.current_folder:
-                    note["folder"] = "默认便签"
-                    
-            # 2. 删除文件夹记录
-            if self.current_folder in self.pet.config.get("note_folders", []):
-                self.pet.config["note_folders"].remove(self.current_folder)
-                
-            save_config(self.pet.config)
+        folder = self.current_folder
+        ask_yes_no(
+            self, '确认删除',
+            f'确定要删除分组【{folder}】吗？\n为防止数据丢失，该分组下的所有便签将被安全转移至【默认便签】！',
+            lambda: self._do_delete_folder(folder))
+
+    def _do_delete_folder(self, folder):
+        # 1. 遍历并转移该分类下的便签
+        for note in self.pet.config.get("notes", []):
+            if note.get("folder") == folder:
+                note["folder"] = "默认便签"
+
+        # 2. 删除文件夹记录
+        if folder in self.pet.config.get("note_folders", []):
+            self.pet.config["note_folders"].remove(folder)
+
+        save_config(self.pet.config)
+        if self.current_folder == folder:
             self.current_folder = "默认便签"
-            self.update_folder_combo()
-            self.refresh_list()
-            QMessageBox.information(self, "成功", "分组已删除，内部便签已转移至【默认便签】。")
+        self.update_folder_combo()
+        self.refresh_list()
+        show_info(self, "成功", "分组已删除，内部便签已转移至【默认便签】。")
 
     def rename_folder(self):
         if self.current_folder == "默认便签":
-            QMessageBox.warning(self, "禁止操作", "【默认便签】为系统基础兼全局分组，无法重命名！")
+            show_warning(self, "禁止操作", "【默认便签】为系统基础兼全局分组，无法重命名！")
             return
-            
-        dlg = InputDialog("重命名分组", f"将【{self.current_folder}】重命名为:", self)
-        dlg.input.setText(self.current_folder)
-        if dlg.exec():
-            new_name = dlg.get_text()
-            if new_name and new_name != self.current_folder:
-                if new_name in self.pet.config["note_folders"]:
-                    QMessageBox.warning(self, "错误", "该分组名称已存在！")
-                    return
-                # 同步修改所有相关便签
-                for n in self.pet.config.get("notes", []):
-                    if n.get("folder") == self.current_folder:
-                        n["folder"] = new_name
-                # 修改目录名单
-                idx = self.pet.config["note_folders"].index(self.current_folder)
-                self.pet.config["note_folders"][idx] = new_name
-                save_config(self.pet.config)
-                
-                self.current_folder = new_name
-                self.update_folder_combo()
-                self.refresh_list()
-                QMessageBox.information(self, "成功", "重命名成功！")
+        old_name = self.current_folder
+        ask_text(self, "重命名分组", f"将【{old_name}】重命名为:",
+                 lambda new_name: self._do_rename_folder(old_name, new_name),
+                 text=old_name)
+
+    def _do_rename_folder(self, old_name, new_name):
+        new_name = new_name.strip()
+        if not new_name or new_name == old_name:
+            return
+        if new_name in self.pet.config["note_folders"]:
+            show_warning(self, "错误", "该分组名称已存在！")
+            return
+        # 同步修改所有相关便签
+        for n in self.pet.config.get("notes", []):
+            if n.get("folder") == old_name:
+                n["folder"] = new_name
+        # 修改目录名单
+        folders = self.pet.config["note_folders"]
+        if old_name in folders:
+            folders[folders.index(old_name)] = new_name
+        save_config(self.pet.config)
+
+        if self.current_folder == old_name:
+            self.current_folder = new_name
+        self.update_folder_combo()
+        self.refresh_list()
+        show_info(self, "成功", "重命名成功！")
 
     def refresh_list(self):
         self.list_widget.clear()
@@ -310,16 +320,18 @@ class NotesManagerDialog(QDialog):
         save_config(self.pet.config)
         self.refresh_list()
 
-    # 找到整个 move_note 方法，替换为：
     def move_note(self, note):
         folders = self.pet.config.setdefault("note_folders", ["默认便签"])
-        folder_name, ok = input_item_box(self, "移动便签", "请选择目标分组:", folders, 0, False)
-        
-        if ok and folder_name:
-            note["folder"] = folder_name
-            save_config(self.pet.config)
-            self.refresh_list()
-            QMessageBox.information(self, "成功", f"已移动至分组：{folder_name}")
+        ask_item(self, "移动便签", "请选择目标分组:", folders,
+                 lambda folder_name: self._do_move_note(note, folder_name))
+
+    def _do_move_note(self, note, folder_name):
+        if not folder_name:
+            return
+        note["folder"] = folder_name
+        save_config(self.pet.config)
+        self.refresh_list()
+        show_info(self, "成功", f"已移动至分组：{folder_name}")
 
     def del_note(self, note):
         self.pet.config["notes"].remove(note)
@@ -333,9 +345,9 @@ class NotesManagerDialog(QDialog):
                 data = [n for n in self.pet.config.get("notes", []) if n.get("folder", "默认便签") == self.current_folder]
                 with open(path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=4)
-                QMessageBox.information(self, "成功", "导出成功！")
+                show_info(self, "成功", "导出成功！")
             except Exception as e:
-                QMessageBox.critical(self, "失败", f"导出失败：{str(e)}")
+                show_critical(self, "失败", f"导出失败：{str(e)}")
 
     def import_notes(self):
         path, _ = QFileDialog.getOpenFileName(self, f"导入至 {self.current_folder}", BASE_DIR, "JSON Files (*.json)")
@@ -344,7 +356,7 @@ class NotesManagerDialog(QDialog):
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if not isinstance(data, list):
-                    QMessageBox.warning(self, "错误", "格式不正确：文件内容应该是一个列表。")
+                    show_warning(self, "错误", "格式不正确：文件内容应该是一个列表。")
                     return
                 good = []
                 for d in data:
@@ -358,13 +370,13 @@ class NotesManagerDialog(QDialog):
                     item.setdefault("locked", False)
                     good.append(item)
                 if not good:
-                    QMessageBox.warning(self, "错误", "文件里没有可识别的便签记录。")
+                    show_warning(self, "错误", "文件里没有可识别的便签记录。")
                     return
                 self.pet.config.setdefault("notes", []).extend(good)
                 save_config(self.pet.config)
                 self.refresh_list()
-                QMessageBox.information(
+                show_info(
                     self, "成功",
                     f"成功导入 {len(good)} 条便签；格式不正确的条目已跳过。")
             except Exception as e:
-                QMessageBox.critical(self, "失败", f"导入失败：{str(e)}")
+                show_critical(self, "失败", f"导入失败：{str(e)}")

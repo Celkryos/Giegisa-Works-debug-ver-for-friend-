@@ -25,9 +25,9 @@ def main():
     init_source = inspect.getsource(oc.DesktopPet.__init__)
     assert "HTTP_PROXY" not in init_source
     assert "HTTPS_PROXY" not in init_source
-    menu_source = inspect.getsource(oc.DesktopPet.show_context_menu)
-    assert menu_source.index("menu.addAction(action_schedule)") < menu_source.index("menu.addMenu(cal_menu)")
-    assert menu_source.index("menu.addMenu(cal_menu)") < menu_source.index("menu.addAction(action_ebook)")
+    menu_source = inspect.getsource(oc.DesktopPet._build_context_menu)
+    assert menu_source.index("传达者日程系统") < menu_source.index("cal_menu = QMenu")
+    assert menu_source.index("cal_menu = QMenu") < menu_source.index("静默阅读舱")
     # Existing user data must remain loadable on every launch.
     assert isinstance(config.load_config(), dict)
     print("REFACTOR_CONTRACT_OK")

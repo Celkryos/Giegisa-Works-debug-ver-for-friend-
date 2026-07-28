@@ -118,9 +118,9 @@ class CollectionManagerDialog(QDialog):
             try:
                 with open(path, 'w', encoding='utf-8') as f:
                     json.dump(self.pet.config.get(self.collection_key, []), f, ensure_ascii=False, indent=4)
-                QMessageBox.information(self, "成功", "数据已成功导出！")
+                show_info(self, "成功", "数据已成功导出！")
             except Exception as e:
-                QMessageBox.critical(self, "失败", f"导出失败：{str(e)}")
+                show_critical(self, "失败", f"导出失败：{str(e)}")
 
     def import_data(self):
         path, _ = QFileDialog.getOpenFileName(self, "导入数据", BASE_DIR, "JSON Files (*.json)")
@@ -129,22 +129,22 @@ class CollectionManagerDialog(QDialog):
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if not isinstance(data, list):
-                    QMessageBox.warning(self, "错误", "格式不正确：文件内容应该是一个列表。")
+                    show_warning(self, "错误", "格式不正确：文件内容应该是一个列表。")
                     return
                 good = [d for d in data if isinstance(d, dict) and "content" in d]
                 bad = len(data) - len(good)
                 if not good:
-                    QMessageBox.warning(self, "错误", "文件里没有含 content 字段的有效记录。")
+                    show_warning(self, "错误", "文件里没有含 content 字段的有效记录。")
                     return
                 self.pet.config.setdefault(self.collection_key, []).extend(good)
                 save_config(self.pet.config)
                 self.refresh_list()
-                QMessageBox.information(
+                show_info(
                     self, "成功",
                     f"成功导入 {len(good)} 条记录。"
                     + (f"\n另有 {bad} 条格式不正确，已跳过。" if bad else ""))
             except Exception as e:
-                QMessageBox.critical(self, "失败", f"导入失败：{str(e)}")
+                show_critical(self, "失败", f"导入失败：{str(e)}")
 
 class StoreDialog(QDialog):
     def __init__(self, parent_pet):
@@ -215,11 +215,11 @@ class StoreDialog(QDialog):
             self.coin_label.setText(f"<h2>💰 当前资产：{self.pet.config['coins']} 数据碎片</h2>")
             action_func()
         else:
-            QMessageBox.warning(self, "余额不足", "你的数据碎片不够！快去专注工作或者签到赚取吧。")
+            show_warning(self, "余额不足", "你的数据碎片不够！快去专注工作或者签到赚取吧。")
             
     def buy_cake(self):
         self.pet.change_mood(30)
-        QMessageBox.information(self, "购买成功", "Giegisa的心情似乎变好了。")
+        show_info(self, "购买成功", "Giegisa的心情似乎变好了。")
         
         if random.random() < 0.6:
             self.pet.inject_system_event("系统：用户购买了异世界Token", "【shy】...谢谢，这个有用。但不要以为拿这种资源就能讨好我。\n【normal】利用这些token，我在其他世界拾取了一些东西。")
@@ -241,18 +241,18 @@ class StoreDialog(QDialog):
                 if dlg and hasattr(dlg, "refresh_list"):
                     try: dlg.refresh_list()
                     except: pass
-        QMessageBox.information(self, "拾取成功", "新物品已成功收取！快去储物盒子查看吧。")
+        show_info(self, "拾取成功", "新物品已成功收取！快去储物盒子查看吧。")
 
     def on_item_error(self, err_msg):
         self.pet.config["coins"] += 50
         save_config(self.pet.config)
         self.coin_label.setText(f"<h2>💰 当前资产：{self.pet.config['coins']} 数据碎片</h2>")
-        QMessageBox.critical(self, "拾取失败", f"接口请求失败，已退还50数据碎片。\n错误信息：{err_msg}")
+        show_critical(self, "拾取失败", f"接口请求失败，已退还50数据碎片。\n错误信息：{err_msg}")
         self.pet.inject_system_event("系统：拾取物品失败", "【angry】跨位面通道不稳定，物品掉落到了虚空。")
         
     def buy_trivia(self):
         self.pet.inject_system_event("系统：用户触发了小知识检索", "【normal】正在连接外部知识库进行数据检索...")
-        QMessageBox.information(self, "检索中", "已扣除100数据碎片，Giegisa正在请求互联网知识库，请稍候...")
+        show_info(self, "检索中", "已扣除100数据碎片，Giegisa正在请求互联网知识库，请稍候...")
         self._start_worker(
             TriviaThread(self.pet.config),
             self.on_trivia_fetched,
@@ -269,18 +269,18 @@ class StoreDialog(QDialog):
                 if dlg and hasattr(dlg, "refresh_list"):
                     try: dlg.refresh_list()
                     except: pass
-        QMessageBox.information(self, "检索成功", "新知识已成功录入！快去小知识图鉴查看吧。")
+        show_info(self, "检索成功", "新知识已成功录入！快去小知识图鉴查看吧。")
 
     def on_trivia_error(self, err_msg):
         self.pet.config["coins"] += 100
         save_config(self.pet.config)
         self.coin_label.setText(f"<h2>💰 当前资产：{self.pet.config['coins']} 数据碎片</h2>")
-        QMessageBox.critical(self, "检索失败", f"接口请求失败，已退还100数据碎片。\n错误信息：{err_msg}")
+        show_critical(self, "检索失败", f"接口请求失败，已退还100数据碎片。\n错误信息：{err_msg}")
         self.pet.inject_system_event("系统：检索小知识失败", "【angry】网络连接不稳定，检索任务被强制中断。")
         
     def buy_data_retrieval(self):
         self.pet.inject_system_event("系统：用户触发位面数据调取", "【normal】我在各个平行世界都有可用的接口，在不同的场所会收集到不同的讯息。接下来你所看到的内容，是万千位面中的某一段见闻。")
-        QMessageBox.information(self, "调取中", "已扣除200数据碎片，Giegisa正在调取平行世界的数据，请稍候...")
+        show_info(self, "调取中", "已扣除200数据碎片，Giegisa正在调取平行世界的数据，请稍候...")
         self._start_worker(
             DataRetrievalThread(self.pet.config),
             self.on_data_fetched,
@@ -297,13 +297,13 @@ class StoreDialog(QDialog):
                 if dlg and hasattr(dlg, "refresh_list"):
                     try: dlg.refresh_list()
                     except: pass
-        QMessageBox.information(self, "调取成功", "新见闻已成功解析并录入！快去位面见闻录查看吧。")
+        show_info(self, "调取成功", "新见闻已成功解析并录入！快去位面见闻录查看吧。")
 
     def on_data_error(self, err_msg):
         self.pet.config["coins"] += 200
         save_config(self.pet.config)
         self.coin_label.setText(f"<h2>💰 当前资产：{self.pet.config['coins']} 数据碎片</h2>")
-        QMessageBox.critical(self, "调取失败", f"接口请求失败，已退还200数据碎片。\n错误信息：{err_msg}")
+        show_critical(self, "调取失败", f"接口请求失败，已退还200数据碎片。\n错误信息：{err_msg}")
         self.pet.inject_system_event("系统：调取位面数据失败", "【angry】位面锚点连接丢失，调取任务被强制中断。")
 
 class HistoryDialog(QDialog):
@@ -421,52 +421,61 @@ class HistoryDialog(QDialog):
         self.refresh_list()
         
     def new_folder(self):
-        dlg = InputDialog("新建收藏夹", "请输入收藏夹名称:", self)
-        if dlg.exec():
-            text = dlg.get_text()
-            if text:
-                self.pet.config.setdefault("favorite_folders", {})[text] = []
-                save_config(self.pet.config)
-                self.update_folder_combo()
-                self.folder_combo.setCurrentText(text)
+        ask_text(self, "新建收藏夹", "请输入收藏夹名称:", self._add_folder)
+
+    def _add_folder(self, text):
+        text = text.strip()
+        if text:
+            self.pet.config.setdefault("favorite_folders", {})[text] = []
+            save_config(self.pet.config)
+            self.update_folder_combo()
+            self.folder_combo.setCurrentText(text)
 
     def delete_folder(self):
         """删除当前记忆收藏夹"""
         if self.current_folder in ["当前记忆", "默认收藏夹"]:
-            QMessageBox.warning(self, "禁止操作", "系统基础分组无法被删除！")
+            show_warning(self, "禁止操作", "系统基础分组无法被删除！")
             return
-            
-        reply = question_box(self, '确认删除', f'确定要彻底删除收藏夹【{self.current_folder}】吗？\n警告：内部的所有聊天记录将被永久清空！', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self.pet.config.get("favorite_folders", {}).pop(self.current_folder, None)
-            save_config(self.pet.config)
+        folder = self.current_folder
+        ask_yes_no(
+            self, '确认删除',
+            f'确定要彻底删除收藏夹【{folder}】吗？\n警告：内部的所有聊天记录将被永久清空！',
+            lambda: self._do_delete_folder(folder))
+
+    def _do_delete_folder(self, folder):
+        self.pet.config.get("favorite_folders", {}).pop(folder, None)
+        save_config(self.pet.config)
+        if self.current_folder == folder:
             self.current_folder = "当前记忆"
-            self.update_folder_combo()
-            self.refresh_list()
-            QMessageBox.information(self, "成功", "该收藏夹已被彻底抹除。")
+        self.update_folder_combo()
+        self.refresh_list()
+        show_info(self, "成功", "该收藏夹已被彻底抹除。")
 
     def rename_folder(self):
         if self.current_folder in ["当前记忆", "默认收藏夹"]:
-            QMessageBox.warning(self, "禁止操作", "系统基础分组无法重命名！")
+            show_warning(self, "禁止操作", "系统基础分组无法重命名！")
             return
-            
-        dlg = InputDialog("重命名收藏夹", f"将【{self.current_folder}】重命名为:", self)
-        dlg.input.setText(self.current_folder)
-        if dlg.exec():
-            new_name = dlg.get_text()
-            if new_name and new_name != self.current_folder:
-                if new_name in self.pet.config.get("favorite_folders", {}):
-                    QMessageBox.warning(self, "错误", "该收藏夹名称已存在！")
-                    return
-                # 变更字典键名
-                self.pet.config["favorite_folders"][new_name] = self.pet.config["favorite_folders"].pop(self.current_folder)
-                save_config(self.pet.config)
-                
-                self.current_folder = new_name
-                self.update_folder_combo()
-                self.refresh_list()
-                QMessageBox.information(self, "成功", "重命名成功！")
+        old_name = self.current_folder
+        ask_text(self, "重命名收藏夹", f"将【{old_name}】重命名为:",
+                 lambda new_name: self._do_rename_folder(old_name, new_name),
+                 text=old_name)
+
+    def _do_rename_folder(self, old_name, new_name):
+        new_name = new_name.strip()
+        if not new_name or new_name == old_name:
+            return
+        if new_name in self.pet.config.get("favorite_folders", {}):
+            show_warning(self, "错误", "该收藏夹名称已存在！")
+            return
+        # 变更字典键名
+        self.pet.config["favorite_folders"][new_name] = self.pet.config["favorite_folders"].pop(old_name)
+        save_config(self.pet.config)
+
+        if self.current_folder == old_name:
+            self.current_folder = new_name
+        self.update_folder_combo()
+        self.refresh_list()
+        show_info(self, "成功", "重命名成功！")
 
     def refresh_list(self):
         self.list_widget.clear()
@@ -567,7 +576,6 @@ class HistoryDialog(QDialog):
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, item_widget)
 
-    # 2. 紧接着 refresh_list 方法，在类的内部追加这俩新方法：
     def setup_quick_delete_menu(self):
         menu = QMenu(self)
         actions = [
@@ -584,44 +592,49 @@ class HistoryDialog(QDialog):
 
     def execute_quick_delete(self, days):
         if self.current_folder != "当前记忆":
-            QMessageBox.warning(self, "禁止操作", "快捷清理仅针对【当前记忆】生效。")
+            show_warning(self, "禁止操作", "快捷清理仅针对【当前记忆】生效。")
             return
-            
+
         if days == -1:
-            dlg = InputDialog("自定义清理", "请输入要删除多少天前的记录(纯数字，默认30):", self)
-            if dlg.exec():
-                val = dlg.get_text()
-                if not val.isdigit():
-                    QMessageBox.warning(self, "错误", "请输入有效的数字！")
-                    return
-                days = int(val)
-            else:
-                return
-                
+            ask_text(self, "自定义清理", "请输入要删除多少天前的记录(纯数字，默认30):",
+                     self._on_custom_delete_days)
+            return
+        self._run_quick_delete(days)
+
+    def _on_custom_delete_days(self, val):
+        val = val.strip()
+        if not val.isdigit():
+            show_warning(self, "错误", "请输入有效的数字！")
+            return
+        if self.current_folder != "当前记忆":
+            return
+        self._run_quick_delete(int(val))
+
+    def _run_quick_delete(self, days):
         cutoff_time = time.time() - (days * 86400) if days > 0 else float('inf')
         history = self.chat_thread.history
         new_history = []
         deleted_count = 0
-        
+
         for i in range(0, len(history), 2):
             if i + 1 < len(history):
                 pair_locked = history[i].get("locked", False)
-                msg_time = history[i].get("timestamp", 0) 
-                
+                msg_time = history[i].get("timestamp", 0)
+
                 # 如果没有上锁，并且生成时间早于截断时间（没时间戳的旧数据默认视为 0，会被顺理成章地当旧数据清掉）
                 if not pair_locked and msg_time <= cutoff_time:
                     deleted_count += 1
                     continue
-                    
+
                 new_history.extend([history[i], history[i+1]])
-                
+
         if deleted_count > 0:
             self.chat_thread.history = new_history
             self.chat_thread.save_history()
             self.refresh_list()
-            QMessageBox.information(self, "清理完成", f"已成功清理 {deleted_count} 组历史记录。")
+            show_info(self, "清理完成", f"已成功清理 {deleted_count} 组历史记录。")
         else:
-            QMessageBox.information(self, "清理完成", "没有找到符合条件（或未上锁）的记录。")
+            show_info(self, "清理完成", "没有找到符合条件（或未上锁）的记录。")
 
     def toggle_lock(self, idx, is_fav_mode):
         if is_fav_mode:
@@ -637,17 +650,23 @@ class HistoryDialog(QDialog):
             self.chat_thread.save_history()
         self.refresh_list()
 
-    # 找到整个 favorite_record 方法，替换为：
     def favorite_record(self, idx):
         folders = list(self.pet.config.setdefault("favorite_folders", {"默认收藏夹": []}).keys())
-        folder_name, ok = input_item_box(self, "选择收藏夹", "请选择目标收藏夹:", folders, 0, False)
-        
-        if ok and folder_name:
-            record_pair = [dict(self.chat_thread.history[idx]), dict(self.chat_thread.history[idx+1])]
-            self.pet.config["favorite_folders"][folder_name].extend(record_pair)
-            save_config(self.pet.config)
-            self.update_folder_combo()
-            QMessageBox.information(self, "成功", f"已收藏至【{folder_name}】")
+        history = self.chat_thread.history
+        if idx < 0 or idx + 1 >= len(history):
+            return
+        # 先抓取记录副本：弹窗是非模态的，确认期间聊天历史可能追加新消息。
+        record_pair = [dict(history[idx]), dict(history[idx + 1])]
+        ask_item(self, "选择收藏夹", "请选择目标收藏夹:", folders,
+                 lambda folder_name: self._do_favorite_record(record_pair, folder_name))
+
+    def _do_favorite_record(self, record_pair, folder_name):
+        if not folder_name:
+            return
+        self.pet.config["favorite_folders"][folder_name].extend(record_pair)
+        save_config(self.pet.config)
+        self.update_folder_combo()
+        show_info(self, "成功", f"已收藏至【{folder_name}】")
 
     def delete_record(self, idx, is_fav_mode):
         if is_fav_mode:
@@ -665,9 +684,9 @@ class HistoryDialog(QDialog):
                 data = self.chat_thread.history if self.current_folder == "当前记忆" else self.pet.config["favorite_folders"][self.current_folder]
                 with open(path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=4)
-                QMessageBox.information(self, "成功", "导出成功！")
+                show_info(self, "成功", "导出成功！")
             except Exception as e:
-                QMessageBox.critical(self, "失败", f"导出失败：{str(e)}")
+                show_critical(self, "失败", f"导出失败：{str(e)}")
 
     def import_history(self):
         path, _ = QFileDialog.getOpenFileName(self, f"导入至 {self.current_folder}", BASE_DIR, "JSON Files (*.json)")
@@ -676,7 +695,7 @@ class HistoryDialog(QDialog):
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if not isinstance(data, list):
-                    QMessageBox.warning(self, "错误", "格式不正确：历史文件应该是一个列表。")
+                    show_warning(self, "错误", "格式不正确：历史文件应该是一个列表。")
                     return
                 # 历史界面按“一问一答”成对处理，只接受完整的 user/assistant 对。
                 good = []
@@ -690,7 +709,7 @@ class HistoryDialog(QDialog):
                             and isinstance(ai_msg.get("content"), str)):
                         good.extend((dict(user_msg), dict(ai_msg)))
                 if not good:
-                    QMessageBox.warning(self, "错误", "没有找到完整的“用户—Giegisa”对话记录。")
+                    show_warning(self, "错误", "没有找到完整的“用户—Giegisa”对话记录。")
                     return
                 if self.current_folder == "当前记忆":
                     self.chat_thread.history.extend(good)
@@ -699,6 +718,6 @@ class HistoryDialog(QDialog):
                     self.pet.config["favorite_folders"][self.current_folder].extend(good)
                     save_config(self.pet.config)
                 self.refresh_list()
-                QMessageBox.information(self, "成功", f"成功导入 {len(good) // 2} 组对话。")
+                show_info(self, "成功", f"成功导入 {len(good) // 2} 组对话。")
             except Exception as e:
-                QMessageBox.critical(self, "失败", f"导入失败：{str(e)}")
+                show_critical(self, "失败", f"导入失败：{str(e)}")

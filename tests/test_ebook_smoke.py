@@ -25,6 +25,7 @@ class FakePet(QWidget):
         self.events = []
         self.bubbles = []
         self.messages = []
+        self.calendar_service = oc.CalendarService(self.config)
 
     def inject_system_event(self, *args):
         self.events.append(args)
@@ -66,9 +67,13 @@ def main():
     app = QApplication.instance() or QApplication(sys.argv)
     old_saver = oc.save_config
     import dialogs.ebook as ebook_dialog
+    import core.calendar_service as calendar_service_module
     old_dialog_saver = ebook_dialog.save_config
+    old_service_saver = calendar_service_module.save_config
     oc.save_config = lambda *args, **kwargs: True
     ebook_dialog.save_config = lambda *args, **kwargs: True
+    # CalendarService 持有自己的 save_config 引用，不 mock 会写真实 config.json。
+    calendar_service_module.save_config = lambda *args, **kwargs: True
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         txt = tmp_path / "book.txt"
@@ -326,6 +331,7 @@ def main():
         app.processEvents()
     oc.save_config = old_saver
     ebook_dialog.save_config = old_dialog_saver
+    calendar_service_module.save_config = old_service_saver
     print("EBOOK_SMOKE_OK")
 
 

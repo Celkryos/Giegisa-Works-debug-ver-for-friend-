@@ -1,2 +1,12 @@
 __pycache__/
 .cache
+.venv/
+
+# 运行时用户数据（不应入库）
+config.json
+history.json
+history.json.bak
+notes.txt
+ebook_library/
+giegisa.log
+_smoke_*.png

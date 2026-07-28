@@ -264,7 +264,7 @@ class EditScheduleDialog(QDialog):
     def save(self):
         task = self.title_input.text().strip()
         if not task:
-            QMessageBox.warning(self, "提示", "标题不能为空。")
+            show_warning(self, "提示", "标题不能为空。")
             return
         d = self.date_edit.date()
         data = {
@@ -325,7 +325,7 @@ class EditCheckinDialog(QDialog):
     def save(self):
         name = self.name_input.text().strip()
         if not name:
-            QMessageBox.warning(self, "提示", "名称不能为空。")
+            show_warning(self, "提示", "名称不能为空。")
             return
         times = []
         for raw in self.times_input.text().replace("，", ",").split(","):
@@ -336,7 +336,7 @@ class EditCheckinDialog(QDialog):
             if qt.isValid():
                 times.append(qt.toString("HH:mm"))
             else:
-                QMessageBox.warning(self, "时间格式不对", f"「{raw}」看不懂，请用 09:00 这种写法。")
+                show_warning(self, "时间格式不对", f"「{raw}」看不懂，请用 09:00 这种写法。")
                 return
         data = {"name": name, "note": self.note_edit.toPlainText().strip(),
                 "remind_times": times, "enabled": self.enable_check.isChecked()}
@@ -621,11 +621,8 @@ class ScheduleDialog(CalendarDialog):
         self.service.update_schedule(sched, {"status": "pending"})
 
     def del_task(self, sched):
-        if question_box(self, "确认删除", f"确定删除「{sched.get('task','')}」吗？",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                        ) != QMessageBox.StandardButton.Yes:
-            return
-        self.service.delete_schedule(sched.get("id"))
+        ask_yes_no(self, "确认删除", f"确定删除「{sched.get('task','')}」吗？",
+                   lambda: self.service.delete_schedule(sched.get("id")))
 
     def add_detailed(self):
         dlg = EditScheduleDialog(self.service, self, default_category=self.cat_combo.currentText())
@@ -1114,14 +1111,11 @@ class CheckinDialog(CalendarDialog):
         self.service.update_checkin(item, {"archived": not item.get("archived", False)})
 
     def delete(self, item):
-        if question_box(
-                self, "确认删除",
-                f"删除「{item.get('name','')}」会连同它的打卡历史一起消失，确定吗？\n"
-                f"（如果只是暂时不做了，建议用 📦 归档）",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        self.service.delete_checkin(item.get("id"))
+        ask_yes_no(
+            self, "确认删除",
+            f"删除「{item.get('name','')}」会连同它的打卡历史一起消失，确定吗？\n"
+            f"（如果只是暂时不做了，建议用 📦 归档）",
+            lambda: self.service.delete_checkin(item.get("id")))
 
 class StatsDialog(CalendarDialog):
     """📊 简单统计：今日情况 + 近一段时间的完成量（纯文字+色条，不引入任何绘图库）"""
