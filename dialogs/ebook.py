@@ -8,6 +8,7 @@ import os
 import random
 import re
 import shutil
+import stat
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -99,11 +100,40 @@ def _format_size(size):
         value /= 1024
 
 
+def _make_tree_writable(path):
+    """去掉目录树内所有文件/子目录的只读属性（尽力而为）。
+
+    shutil.copy2 会把源文件的只读属性一起复制进书库；Windows 上
+    rmtree 无法删除只读文件（WinError 5），这正是删书后目录残留、
+    且重启后重试依然失败的根因。删除前先统一去只读。
+    """
+    for root, dirs, files in os.walk(path):
+        for name in dirs + files:
+            try:
+                os.chmod(os.path.join(root, name), stat.S_IWRITE)
+            except OSError:
+                pass
+
+
+def _copy_book_file(src, dst):
+    """复制书籍/资源文件并保证副本可写。
+
+    shutil.copy2 会连同只读属性一起复制；只读副本日后删除时会在
+    Windows 上触发 WinError 5 残留，因此复制后立刻去掉只读位。
+    """
+    shutil.copy2(src, dst)
+    try:
+        os.chmod(dst, stat.S_IWRITE)
+    except OSError:
+        pass
+
+
 def _force_delete_dir(path, attempts=3, delay=0.05):
-    """尽力删除目录。Windows 上若文件被占用，回退到 MoveFileEx
-    (MOVEFILE_DELAY_UNTIL_REBOOT)，由内核在下次启动时清理。"""
+    """尽力删除目录。先去只读属性再 rmtree；Windows 上若文件仍被占用，
+    回退到 MoveFileEx(MOVEFILE_DELAY_UNTIL_REBOOT)，由内核在下次启动时清理。"""
     if not os.path.isdir(path):
         return
+    _make_tree_writable(path)
     for _ in range(attempts):
         try:
             shutil.rmtree(path)
@@ -2182,7 +2212,7 @@ class EbookShelfDialog(QDialog):
                     folder, "book" + Path(absolute).suffix.lower())
                 if os.path.abspath(final_path) != absolute:
                     temporary = final_path + ".importing"
-                    shutil.copy2(absolute, temporary)
+                    _copy_book_file(absolute, temporary)
                     os.replace(temporary, final_path)
                 self._copy_html_resources(absolute, folder)
                 existing["path"] = final_path
@@ -2204,7 +2234,7 @@ class EbookShelfDialog(QDialog):
             folder = os.path.join(EBOOK_DIR, str(book_id))
             os.makedirs(folder, exist_ok=True)
             final_path = os.path.join(folder, "book" + Path(path).suffix.lower())
-            shutil.copy2(path, final_path)
+            _copy_book_file(path, final_path)
             self._copy_html_resources(path, folder)
         book = {
             "id": book_id, "title": Path(path).stem, "path": final_path,
@@ -2231,7 +2261,7 @@ class EbookShelfDialog(QDialog):
                 if ".." not in relative.parts and source_image.is_file():
                     target_image = Path(folder, relative)
                     target_image.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source_image, target_image)
+                    _copy_book_file(source_image, target_image)
         except Exception:
             pass
 
