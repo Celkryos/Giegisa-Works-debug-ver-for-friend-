@@ -180,7 +180,7 @@ class MoodDialog(QDialog):
         QMessageBox.information(self, "已重置", "单次沟通情绪已归零。")
 
     def reset_total(self):
-        reply = QMessageBox.question(self, '确认', '确定要将长期羁绊重置为初见状态(50)吗？', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = question_box(self, '确认', '确定要将长期羁绊重置为初见状态(50)吗？', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             self.pet.total_mood = 50.0
             self.pet.config["total_mood"] = 50.0

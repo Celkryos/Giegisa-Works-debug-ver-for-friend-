@@ -174,7 +174,7 @@ class NotesManagerDialog(QDialog):
             QMessageBox.warning(self, "禁止操作", "【默认便签】为系统基础分组，无法被删除！")
             return
             
-        reply = QMessageBox.question(self, '确认删除', f'确定要删除分组【{self.current_folder}】吗？\n为防止数据丢失，该分组下的所有便签将被安全转移至【默认便签】！', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = question_box(self, '确认删除', f'确定要删除分组【{self.current_folder}】吗？\n为防止数据丢失，该分组下的所有便签将被安全转移至【默认便签】！', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply == QMessageBox.StandardButton.Yes:
             # 1. 遍历并转移该分类下的便签
@@ -313,7 +313,7 @@ class NotesManagerDialog(QDialog):
     # 找到整个 move_note 方法，替换为：
     def move_note(self, note):
         folders = self.pet.config.setdefault("note_folders", ["默认便签"])
-        folder_name, ok = QInputDialog.getItem(self, "移动便签", "请选择目标分组:", folders, 0, False)
+        folder_name, ok = input_item_box(self, "移动便签", "请选择目标分组:", folders, 0, False)
         
         if ok and folder_name:
             note["folder"] = folder_name

@@ -436,7 +436,7 @@ class HistoryDialog(QDialog):
             QMessageBox.warning(self, "禁止操作", "系统基础分组无法被删除！")
             return
             
-        reply = QMessageBox.question(self, '确认删除', f'确定要彻底删除收藏夹【{self.current_folder}】吗？\n警告：内部的所有聊天记录将被永久清空！', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = question_box(self, '确认删除', f'确定要彻底删除收藏夹【{self.current_folder}】吗？\n警告：内部的所有聊天记录将被永久清空！', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply == QMessageBox.StandardButton.Yes:
             self.pet.config.get("favorite_folders", {}).pop(self.current_folder, None)
@@ -640,7 +640,7 @@ class HistoryDialog(QDialog):
     # 找到整个 favorite_record 方法，替换为：
     def favorite_record(self, idx):
         folders = list(self.pet.config.setdefault("favorite_folders", {"默认收藏夹": []}).keys())
-        folder_name, ok = QInputDialog.getItem(self, "选择收藏夹", "请选择目标收藏夹:", folders, 0, False)
+        folder_name, ok = input_item_box(self, "选择收藏夹", "请选择目标收藏夹:", folders, 0, False)
         
         if ok and folder_name:
             record_pair = [dict(self.chat_thread.history[idx]), dict(self.chat_thread.history[idx+1])]

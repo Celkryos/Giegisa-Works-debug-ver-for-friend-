@@ -621,9 +621,9 @@ class ScheduleDialog(CalendarDialog):
         self.service.update_schedule(sched, {"status": "pending"})
 
     def del_task(self, sched):
-        if QMessageBox.question(self, "确认删除", f"确定删除「{sched.get('task','')}」吗？",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                                ) != QMessageBox.StandardButton.Yes:
+        if question_box(self, "确认删除", f"确定删除「{sched.get('task','')}」吗？",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                        ) != QMessageBox.StandardButton.Yes:
             return
         self.service.delete_schedule(sched.get("id"))
 
@@ -1114,7 +1114,7 @@ class CheckinDialog(CalendarDialog):
         self.service.update_checkin(item, {"archived": not item.get("archived", False)})
 
     def delete(self, item):
-        if QMessageBox.question(
+        if question_box(
                 self, "确认删除",
                 f"删除「{item.get('name','')}」会连同它的打卡历史一起消失，确定吗？\n"
                 f"（如果只是暂时不做了，建议用 📦 归档）",

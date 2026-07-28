@@ -98,42 +98,73 @@ def _format_size(size):
 
 
 def _cleanup_pending_ebook_deletions():
-    """启动时清理上次未能删除的电子书副本目录。"""
+    """启动时清理上次未能删除的电子书副本目录。
+
+    两阶段清理：
+    1. 处理 _pending_cleanup.json 中登记的目录
+    2. 扫描 EBOOK_DIR 下所有 *.deleted.* 目录（兜底，防止标记文件写入失败的残留）
+    """
     marker = _PENDING_CLEANUP_FILE
-    if not os.path.isfile(marker):
-        return
-    try:
-        with open(marker, "r", encoding="utf-8") as f:
-            entries = json.load(f)
-        if not isinstance(entries, list):
-            entries = [entries]
-    except Exception:
+    targets = []  # (path, source) tuples
+
+    # ---- 阶段 1：从标记文件读取 ----
+    if os.path.isfile(marker):
+        try:
+            with open(marker, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+            if not isinstance(entries, list):
+                entries = [entries]
+            for entry in entries:
+                folder = entry.get("folder", "") if isinstance(entry, dict) else str(entry)
+                if folder:
+                    targets.append((folder, entry.get("original", "") if isinstance(entry, dict) else ""))
+        except Exception:
+            pass
+        # 无论如何先删掉旧标记；如果下面清理失败会重新写入
         try:
             os.remove(marker)
         except OSError:
             pass
-        return
+
+    # ---- 阶段 2：扫描 EBOOK_DIR 下的 .deleted. 残留 ----
+    if os.path.isdir(EBOOK_DIR):
+        try:
+            for name in os.listdir(EBOOK_DIR):
+                if ".deleted." in name:
+                    full = os.path.join(EBOOK_DIR, name)
+                    if os.path.isdir(full):
+                        targets.append((full, ""))
+        except OSError:
+            pass
+
+    # ---- 去重后逐个清理 ----
+    root = os.path.abspath(EBOOK_DIR)
+    seen = set()
     remaining = []
-    for entry in entries:
-        folder = entry.get("folder", "") if isinstance(entry, dict) else str(entry)
-        root = os.path.abspath(EBOOK_DIR)
-        target = os.path.abspath(folder) if folder else ""
-        if (os.path.commonpath((root, target)) == root
-                and os.path.isdir(target)):
+    for target, source in targets:
+        target = os.path.abspath(target) if target else ""
+        if not target or target in seen:
+            continue
+        seen.add(target)
+        if (os.path.commonpath((root, target)) != root
+                or not os.path.isdir(target)):
+            continue
+        for _ in range(3):
             try:
                 shutil.rmtree(target)
+                break
             except Exception:
-                remaining.append(entry)
+                time.sleep(0.05)
+        else:
+            remaining.append({"folder": target, "original": source or target})
+
+    # ---- 重写标记（仅当仍有残留时） ----
     if remaining:
         try:
+            os.makedirs(EBOOK_DIR, exist_ok=True)
             with open(marker, "w", encoding="utf-8") as f:
                 json.dump(remaining, f, ensure_ascii=False)
         except Exception:
-            pass
-    else:
-        try:
-            os.remove(marker)
-        except OSError:
             pass
 
 
@@ -1246,7 +1277,7 @@ class EbookReaderDialog(QDialog):
         if not selected:
             self.pet.show_bubble("【normal】先选中要批注的文字。")
             return
-        note, ok = QInputDialog.getMultiLineText(self, "添加批注", "批注内容：")
+        note, ok = input_multi_text_box(self, "添加批注", "批注内容：")
         if not ok:
             return
         start, end, text = selected
@@ -1341,7 +1372,7 @@ class EbookReaderDialog(QDialog):
         if kind == "bookmark":
             mark = next((m for m in self.book.get("bookmarks", []) if m.get("id") == mark_id), None)
             if mark:
-                title, ok = QInputDialog.getText(self, "修改书签", "书签名称：", text=mark.get("title", "书签"))
+                title, ok = input_text_box(self, "修改书签", "书签名称：", text=mark.get("title", "书签"))
                 if ok and title.strip():
                     mark["title"] = title.strip()
         else:
@@ -1352,8 +1383,8 @@ class EbookReaderDialog(QDialog):
                         "【normal】这是纯高亮，没有批注文字。"
                         "如需改色请使用“修改选中高亮 / 批注颜色”。")
                     return
-                note, ok = QInputDialog.getMultiLineText(
-                    self, "修改批注", "批注内容：", mark.get("note", ""))
+                note, ok = input_multi_text_box(
+                    self, "修改批注", "批注内容：", text=mark.get("note", ""))
                 if not ok:
                     return
                 mark["note"] = note.strip()
@@ -1900,6 +1931,17 @@ class EbookShelfDialog(QDialog):
         for duplicate in duplicates:
             if duplicate in library:
                 library.remove(duplicate)
+            # 清理被合并的重复书籍的托管目录，避免残留的 assets 和封面图片堆积
+            dup_id = duplicate.get("id") if isinstance(duplicate, dict) else None
+            if dup_id and duplicate.get("managed"):
+                dup_folder = os.path.abspath(os.path.join(EBOOK_DIR, str(dup_id)))
+                root = os.path.abspath(EBOOK_DIR)
+                if (os.path.commonpath((root, dup_folder)) == root
+                        and os.path.isdir(dup_folder)):
+                    try:
+                        shutil.rmtree(dup_folder)
+                    except OSError:
+                        pass
         return changed
 
     @staticmethod
@@ -2169,7 +2211,7 @@ class EbookShelfDialog(QDialog):
         book = self.selected_book()
         if not book:
             return
-        category, ok = QInputDialog.getText(
+        category, ok = input_text_box(
             self, "书架分类", "分类名称：", text=book.get("category", "默认书架"))
         if ok and category.strip():
             book["category"] = category.strip()
@@ -2208,7 +2250,7 @@ class EbookShelfDialog(QDialog):
             message += "\n这本书是导入到桌宠书库的副本，副本文件也会删除。"
         else:
             message += "\n原文件夹中的电子书不会被删除。"
-        if QMessageBox.question(
+        if question_box(
                 self, "确认删除", message,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         ) != QMessageBox.StandardButton.Yes:
@@ -2263,25 +2305,35 @@ class EbookShelfDialog(QDialog):
                             gc.collect()
                 # 重试仍失败 → 重命名释放原始路径，再试一次
                 if cleanup_error:
+                    temp_dir = folder + ".deleted." + str(int(time.time()))
+                    renamed = False
                     try:
-                        temp_dir = folder + ".deleted." + str(int(time.time()))
                         os.rename(folder, temp_dir)
+                        renamed = True
                         shutil.rmtree(temp_dir)
                         cleanup_error = None
                     except OSError as exc:
                         cleanup_error = str(exc)
-                        # 重命名后的目录也删不掉 → 写入待清理清单，下次启动再删
+                    # 只要 rename 成功（原始路径已释放），无论 rmtree 是否成功，
+                    # 都把重命名后的目录写入待清理清单，下次启动兜底
+                    if renamed and cleanup_error:
                         try:
-                            if os.path.isdir(temp_dir):
-                                entries = []
-                                if os.path.isfile(_PENDING_CLEANUP_FILE):
-                                    with open(_PENDING_CLEANUP_FILE, "r", encoding="utf-8") as f:
-                                        existing = json.load(f)
+                            entries = []
+                            if os.path.isfile(_PENDING_CLEANUP_FILE):
+                                try:
+                                    with open(_PENDING_CLEANUP_FILE, "r", encoding="utf-8") as fh:
+                                        existing = json.load(fh)
                                     entries = existing if isinstance(existing, list) else [existing]
-                                entries.append({"folder": temp_dir, "original": folder})
-                                os.makedirs(EBOOK_DIR, exist_ok=True)
-                                with open(_PENDING_CLEANUP_FILE, "w", encoding="utf-8") as f:
-                                    json.dump(entries, f, ensure_ascii=False)
+                                except Exception:
+                                    pass
+                            entries.append({"folder": temp_dir, "original": folder})
+                            os.makedirs(EBOOK_DIR, exist_ok=True)
+                            tmp_marker = _PENDING_CLEANUP_FILE + ".tmp"
+                            with open(tmp_marker, "w", encoding="utf-8") as fh:
+                                json.dump(entries, fh, ensure_ascii=False)
+                                fh.flush()
+                                os.fsync(fh.fileno())
+                            os.replace(tmp_marker, _PENDING_CLEANUP_FILE)
                         except Exception:
                             pass
 
