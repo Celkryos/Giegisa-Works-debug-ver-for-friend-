@@ -36,6 +36,33 @@ _PRIVATE_PROMPT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# 单条气泡的最大字符数：超出即拆成连续多条气泡依次播放，
+# 防止超长回复把窗口顶出屏幕、文字显示不全。
+_BUBBLE_SPLIT_LEN = 400
+
+
+def _split_bubble_text(text, limit=_BUBBLE_SPLIT_LEN):
+    """把超长回复拆成若干条短文本。优先在换行/句末标点处断开，
+    找不到合适断点时才硬切，尽量不打断一句话。"""
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return [text] if text else []
+    chunks = []
+    remaining = text
+    while len(remaining) > limit:
+        window = remaining[:limit]
+        cut = max(window.rfind("\n"), window.rfind("。"), window.rfind("！"),
+                  window.rfind("？"), window.rfind("；"), window.rfind(". "))
+        if cut < limit // 2:
+            cut = limit
+        else:
+            cut += 1  # 连同句末标点一起切走
+        chunks.append(remaining[:cut].strip())
+        remaining = remaining[cut:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return [chunk for chunk in chunks if chunk]
+
 
 def sanitize_bubble_text(text):
     """清除情绪控制符和模型偶尔复述出的后台提示，不伤普通中文括号。"""
@@ -351,13 +378,30 @@ class DesktopPet(QWidget):
         return ""
 
     def handle_api_lag(self, elapsed):
-        self.inject_system_event("系统：检测到API响应卡顿", f"【angry】网络传输延迟达到了 {elapsed:.1f} 秒... 这种低效的数据链路让我非常烦躁。")
+        # 静默模式：只写入历史（记忆档案可查），不弹气泡——
+        # 显性气泡会把正在生成/显示的正式回答挤掉（0.1.6 回归）。
+        self.inject_system_event(
+            "系统：检测到API响应卡顿",
+            f"【angry】网络传输延迟达到了 {elapsed:.1f} 秒... 这种低效的数据链路让我非常烦躁。",
+            show=False)
 
     def resizeEvent(self, event):
-        # 打字期间气泡长高会把窗口向上顶（保持“脚”原地）。拖拽中不做这个
-        # 锚定位移，否则窗口在“锚定位置”和“拖拽位置”之间打架、表现为坐标飘动。
-        if event.oldSize().height() > 0 and not self.is_following:
-            self.move(self.x(), self.y() - (event.size().height() - event.oldSize().height()))
+        # 以“窗口底边中点”为锚：气泡文字增长时向上、向两侧对称扩展，
+        # 桌宠图像与输入框在屏幕上的位置保持不动（仅用户拖动可移动）。
+        # 拖拽中不做锚定，避免与鼠标拖拽打架（坐标飘动旧疾）。
+        if event.oldSize().width() > 0 and not self.is_following:
+            new_size = event.size()
+            anchor_cx = self.x() + event.oldSize().width() / 2
+            anchor_bottom = self.y() + event.oldSize().height()
+            new_x = round(anchor_cx - new_size.width() / 2)
+            new_y = round(anchor_bottom - new_size.height())
+            # 气泡较高时窗口可能顶出屏幕导致文字被裁掉：夹回可用区域
+            screen = (QApplication.screenAt(QPoint(round(anchor_cx), round(anchor_bottom)))
+                      or QApplication.primaryScreen())
+            avail = screen.availableGeometry()
+            new_x = max(avail.left(), min(new_x, avail.right() - new_size.width() + 1))
+            new_y = max(avail.top(), min(new_y, avail.bottom() - new_size.height() + 1))
+            self.move(new_x, new_y)
         super().resizeEvent(event)
 
     def check_daily_signin(self):
@@ -1015,13 +1059,20 @@ class DesktopPet(QWidget):
         dlg = RandomEventDialog(self, data)
         dlg.show()
 
-    def inject_system_event(self, user_action, ai_response):
+    def inject_system_event(self, user_action, ai_response, show=True):
         clean_response = sanitize_bubble_text(ai_response)
         now_ts = time.time()
         self.chat_thread.history.append({"role": "user", "content": f"（{user_action}）", "timestamp": now_ts})
         self.chat_thread.history.append({"role": "assistant", "content": clean_response, "timestamp": now_ts})
         self.chat_thread.save_history()
-        self.handle_api_reply(ai_response)
+        if show:
+            self.handle_api_reply(ai_response)
+        elif getattr(self, 'dlg_HistoryDialog', None):
+            # 静默模式不弹气泡，但已打开的记忆档案面板仍应即时刷新可见
+            try:
+                self.dlg_HistoryDialog.refresh_list()
+            except RuntimeError:
+                pass
 
     def handle_api_reply(self, reply_text, type_interval=None):
         reply_text = str(reply_text or "")
@@ -1074,7 +1125,16 @@ class DesktopPet(QWidget):
         self.full_text = reply_text
         self._pending_type_interval = type_interval
         if self.full_text:
-            self.play_text()
+            # 超长回复拆成连续多条气泡依次播放，保证任何长度都能完整显示
+            chunks = _split_bubble_text(self.full_text)
+            self.full_text = chunks[0] if chunks else ""
+            for extra in chunks[1:]:
+                self._bubble_queue.append((extra, type_interval))
+            self._bubble_queue = self._bubble_queue[-8:]
+            if self.full_text:
+                self.play_text()
+            else:
+                self.chat_bubble.hide()
         else:
             self.chat_bubble.hide() # 如果这条回复纯粹只是发图，直接隐藏文字气泡
 
