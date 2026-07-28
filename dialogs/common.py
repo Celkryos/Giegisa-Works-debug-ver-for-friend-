@@ -54,19 +54,25 @@ def _show_popup(dlg):
 
 
 def ask_yes_no(parent, title, text, on_yes, on_no=None):
-    """非模态“是/否”确认框。点“是”执行 on_yes；点“否”或关闭执行 on_no。"""
+    """非模态“是/否”确认框。点“是”执行 on_yes；点“否”、关闭窗口或
+    按 Esc 均执行 on_no。回调统一在窗口关闭后的 finished 阶段分发，
+    保证有且只有一次。"""
     box = QMessageBox(QMessageBox.Icon.Question, title, text,
                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                       parent)
     box.setDefaultButton(QMessageBox.StandardButton.No)
+    state = {"yes": False}
 
     def _clicked(btn):
-        if box.standardButton(btn) == QMessageBox.StandardButton.Yes:
-            _safe_callback(on_yes)
-        else:
-            _safe_callback(on_no)
+        # buttonClicked 先于 finished 触发，只记录选择，不直接回调。
+        state["yes"] = (box.standardButton(btn)
+                        == QMessageBox.StandardButton.Yes)
+
+    def _finished(_result):
+        _safe_callback(on_yes if state["yes"] else on_no)
 
     box.buttonClicked.connect(_clicked)
+    box.finished.connect(_finished)
     return _show_popup(box)
 
 

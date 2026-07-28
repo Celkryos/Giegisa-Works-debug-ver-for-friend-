@@ -87,6 +87,13 @@ def main():
     box.button(QMessageBox.StandardButton.Yes).click()
     assert calls == ["no", "yes"], calls
 
+    # 右上角 X 关闭（或 Esc）同样走 on_no，有且只有一次。
+    box = ask_yes_no(parent, "确认删除", "确定删除吗？",
+                     lambda: calls.append("yes"), lambda: calls.append("no"))
+    box.close()
+    app.processEvents()
+    assert calls == ["no", "yes", "no"], calls
+
     # 回调抛异常不得拖垮进程（PyQt6 默认 qFatal 闪退，helper 必须兜底）。
     box = ask_yes_no(parent, "确认", "会抛异常的回调",
                      lambda: (_ for _ in ()).throw(RuntimeError("boom")))
