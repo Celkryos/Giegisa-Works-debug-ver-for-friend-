@@ -15,7 +15,7 @@ import shutil
 from datetime import datetime, date, timedelta
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QMenu, QLineEdit, QVBoxLayout, QHBoxLayout, QDialog, QListWidget, QPushButton, QListWidgetItem, QTextEdit, QMessageBox, QFormLayout, QSpinBox, QColorDialog, QComboBox, QGroupBox, QFileDialog, QTimeEdit, QSizePolicy, QInputDialog, QSystemTrayIcon, QCheckBox, QGridLayout, QDateEdit, QScrollArea)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPoint, QTime, QByteArray, QBuffer, QIODevice, QDate
-from PyQt6.QtGui import QPixmap, QColor, QAction, QCursor, QIcon, QImage
+from PyQt6.QtGui import QPixmap, QColor, QAction, QCursor, QIcon, QImage, QTextCursor
 
 from config import (BASE_DIR, PIC_DIR, UI_BACKGROUND_FILE, CONFIG_FILE, HISTORY_FILE, NOTES_FILE, DEFAULT_CONFIG, LOAD_WARNINGS, safe_json_save, _atomic_write_json, _read_json, load_config, save_config, flush_config_if_dirty)
 from core.utils import *
@@ -161,6 +161,12 @@ class DesktopPet(QWidget):
         self.chat_thread.error_occurred.connect(self.handle_api_reply)
         self.chat_thread.api_lag_occurred.connect(self.handle_api_lag)
         self.chat_thread.summary_updated.connect(self.on_summary_updated)
+        self.chat_thread.send_failed.connect(self.on_send_failed)
+
+        # 终端式输入历史（方向键上/下翻阅）：独立维护，不混入聊天历史档案
+        self._input_nav_index = None   # None = 未在翻阅；否则为 history 下标
+        self._input_draft = ""         # 开始翻阅时暂存的草稿
+        self._pending_user_restore = None  # 待失败回填的用户消息载荷
 
         self.last_media_title = ""
 
@@ -614,6 +620,8 @@ class DesktopPet(QWidget):
         self.input_box = ChatInputBox()
         self.input_box.returnPressed.connect(self.send_msg)
         self.input_box.image_pasted.connect(self.on_image_pasted)
+        self.input_box.historyUp.connect(lambda: self._navigate_input_history(-1))
+        self.input_box.historyDown.connect(lambda: self._navigate_input_history(1))
         self.input_box.setVisible(self.config.get("show_input_box", True))
         self.main_layout.addWidget(self.input_box)
 
@@ -1074,6 +1082,54 @@ class DesktopPet(QWidget):
             self.chat_bubble.hide()
             self.adjustSize()
 
+    def _record_input_history(self, msg):
+        """记录用户输入指令序列（方向键上/下翻阅用）。
+        单独存于 config["input_history"]，不写入聊天历史档案。"""
+        history = self.config.setdefault("input_history", [])
+        if not history or history[-1] != msg:
+            history.append(msg)
+            del history[:-50]  # 只保留最近 50 条
+            save_config(self.config, force=False)
+        self._input_nav_index = None
+
+    def _navigate_input_history(self, direction):
+        """方向键上/下翻阅输入历史：↑(-1) 更早、↓(+1) 更近，
+        翻过最新一条后恢复开始翻阅前暂存的草稿。"""
+        history = self.config.get("input_history", [])
+        if not history:
+            return
+        if self._input_nav_index is None:
+            self._input_draft = self.input_box.toPlainText()
+            self._input_nav_index = len(history)
+        self._input_nav_index = max(
+            0, min(len(history), self._input_nav_index + direction))
+        if self._input_nav_index >= len(history):
+            self.input_box.setPlainText(self._input_draft)
+        else:
+            self.input_box.setPlainText(history[self._input_nav_index])
+        cursor = self.input_box.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.input_box.setTextCursor(cursor)
+
+    def on_send_failed(self, failed_msg):
+        """发送失败：把未发出去的内容退回输入框（等同按一下方向上键）。
+        只回填用户手动发送的消息；后台隐藏指令失败不回填。"""
+        stash = getattr(self, "_pending_user_restore", None)
+        if not stash or stash[0] != failed_msg:
+            return
+        self._pending_user_restore = None
+        msg, image_b64, image_mime = stash
+        self.input_box.setPlainText(msg)
+        if image_b64:
+            # 图片附件一并退回
+            self.input_box.pending_image_b64 = image_b64
+            self.input_box.pending_image_mime = image_mime
+            self.on_image_pasted()
+        cursor = self.input_box.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.input_box.setTextCursor(cursor)
+        self._input_nav_index = None
+
     def send_msg(self, text_override=None, hidden=False):
         self.idle_seconds = 0
         msg = text_override if text_override else self.input_box.toPlainText().strip()
@@ -1103,6 +1159,8 @@ class DesktopPet(QWidget):
             self.input_box.clear()
             self.clear_pending_image()   # 图片发出后清空附件与提示条
             self._dismiss_current_bubble()
+            self._record_input_history(msg)
+            self._pending_user_restore = (msg, image_b64, image_mime)
             self.show_bubble("...")
             self.update_image("biyan")
 

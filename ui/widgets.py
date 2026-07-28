@@ -131,6 +131,8 @@ class DraggableListWidget(ResponsiveListWidget):
 class ChatInputBox(QTextEdit):
     returnPressed = pyqtSignal()
     image_pasted = pyqtSignal()   # 粘贴了图片时通知主界面更新提示
+    historyUp = pyqtSignal()      # 光标在首行时按 ↑：翻阅更早的输入历史
+    historyDown = pyqtSignal()    # 光标在末行时按 ↓：翻阅更近的输入历史
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -196,6 +198,12 @@ class ChatInputBox(QTextEdit):
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             self.returnPressed.emit()
+        elif event.key() == Qt.Key.Key_Up and self.textCursor().blockNumber() == 0:
+            # 仅在首行按 ↑ 才翻阅历史，不打断多行草稿内的光标移动
+            self.historyUp.emit()
+        elif event.key() == Qt.Key.Key_Down and self.textCursor().blockNumber() == self.document().blockCount() - 1:
+            # 仅在末行按 ↓ 才翻阅历史
+            self.historyDown.emit()
         else:
             super().keyPressEvent(event)
 
