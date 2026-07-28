@@ -395,12 +395,14 @@ class DesktopPet(QWidget):
             anchor_bottom = self.y() + event.oldSize().height()
             new_x = round(anchor_cx - new_size.width() / 2)
             new_y = round(anchor_bottom - new_size.height())
-            # 气泡较高时窗口可能顶出屏幕导致文字被裁掉：夹回可用区域
-            screen = (QApplication.screenAt(QPoint(round(anchor_cx), round(anchor_bottom)))
+            # 只在气泡顶要超出“窗口所在屏幕”的顶边时才上抬，其余方向
+            # 一概不动——否则桌宠停在屏幕底边/副屏时会被夹持逻辑来回
+            # 拉扯，表现为上下左右跳变。
+            screen = (QApplication.screenAt(self.geometry().center())
                       or QApplication.primaryScreen())
-            avail = screen.availableGeometry()
-            new_x = max(avail.left(), min(new_x, avail.right() - new_size.width() + 1))
-            new_y = max(avail.top(), min(new_y, avail.bottom() - new_size.height() + 1))
+            top = screen.availableGeometry().top()
+            if new_y < top:
+                new_y = top
             self.move(new_x, new_y)
         super().resizeEvent(event)
 
@@ -563,7 +565,9 @@ class DesktopPet(QWidget):
 
 
     def apply_bubble_style(self):
-        self.chat_bubble.setMaximumWidth(self.config["bubble_width"])
+        # 定宽气泡：宽度恒为用户设定的“气泡最大宽度”，窗口宽度不再
+        # 随文字长短变化，根除横向跳变（图像始终保持原地）。
+        self.chat_bubble.setFixedWidth(self.config["bubble_width"])
         self.chat_bubble.setStyleSheet(f"""
             QLabel {{
                 background-color: {self.config['bubble_bg']};
@@ -984,6 +988,20 @@ class DesktopPet(QWidget):
         self.image_hint.hide()
         self.adjustSize()
 
+    def _dismiss_current_bubble(self):
+        """发送新消息前立即终结上一轮回复的展示：停止打字、收起气泡、
+        丢弃未播放的旧气泡。否则旧回复会在新消息发出后短暂闪现甚至
+        继续打字播放。"""
+        self.type_timer.stop()
+        self.is_typing = False
+        self.is_speaking = False
+        self.end_blink_timer.stop()
+        self._bubble_hold_until = 0.0
+        self._bubble_queue.clear()
+        if self.chat_bubble.isVisible():
+            self.chat_bubble.hide()
+            self.adjustSize()
+
     def send_msg(self, text_override=None, hidden=False):
         self.idle_seconds = 0
         msg = text_override if text_override else self.input_box.toPlainText().strip()
@@ -1012,6 +1030,7 @@ class DesktopPet(QWidget):
         if not hidden:
             self.input_box.clear()
             self.clear_pending_image()   # 图片发出后清空附件与提示条
+            self._dismiss_current_bubble()
             self.show_bubble("...")
             self.update_image("biyan")
 
@@ -1172,6 +1191,8 @@ class DesktopPet(QWidget):
         self.is_speaking = True
         self.end_blink_timer.stop()
 
+        # 先清空再显示：否则气泡会带着上一轮回复的旧文本闪现一帧。
+        self.chat_bubble.setText("")
         self.chat_bubble.show()
         self.speak_timer.start(200)
         interval = self._pending_type_interval

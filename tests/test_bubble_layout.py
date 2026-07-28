@@ -23,9 +23,16 @@ import dialogs.ebook as ebook_dialog_module
 class _FakeChatThread:
     def __init__(self):
         self.history = []
+        self.sent = []
 
     def save_history(self):
         pass
+
+    def isRunning(self):
+        return False
+
+    def send_message(self, *args, **kwargs):
+        self.sent.append(args)
 
 
 def _image_anchor(pet):
@@ -54,9 +61,11 @@ def main():
         pet.show()
         app.processEvents()
 
-        # ---- 1. 锚定：气泡从无到有、从短到长，图像坐标不动 ----
+        # ---- 1. 锚定+定宽：气泡从无到有、从短到长，图像坐标不动、宽度恒定 ----
         pet.move(500, 300)
+        assert pet.chat_bubble.width() == fake_config["bubble_width"], "气泡未按配置定宽"
         before = _image_anchor(pet)
+        win_w0 = pet.width()
         pet.chat_bubble.setText("短气泡")
         pet.chat_bubble.show()
         pet.adjustSize()
@@ -66,6 +75,7 @@ def main():
         pet.adjustSize()
         app.processEvents()
         after = _image_anchor(pet)
+        assert pet.width() == win_w0, (win_w0, pet.width())
         for a, b in ((before, mid), (mid, after)):
             assert abs(a[0] - b[0]) <= 2, (a, b)
             assert abs(a[1] - b[1]) <= 2, (a, b)
@@ -77,6 +87,22 @@ def main():
         app.processEvents()
         avail = app.primaryScreen().availableGeometry()
         assert pet.y() >= avail.top(), (pet.y(), avail.top())
+
+        # ---- 2b. 桌宠停在屏幕底边（底部超出屏幕）时不得被夹持上拉 ----
+        pet.chat_bubble.hide()
+        pet.adjustSize()
+        app.processEvents()
+        park_y = avail.bottom() - pet.height() + 40  # 底部探出屏幕 40px
+        pet.move(500, park_y)
+        app.processEvents()
+        parked = _image_anchor(pet)
+        pet.chat_bubble.setText("底部长气泡，" * 20)
+        pet.chat_bubble.show()
+        pet.adjustSize()
+        app.processEvents()
+        grown = _image_anchor(pet)
+        assert abs(parked[0] - grown[0]) <= 2, (parked, grown)
+        assert abs(parked[1] - grown[1]) <= 2, (parked, grown)
 
         pet.chat_bubble.hide()
         pet.adjustSize()
@@ -112,6 +138,21 @@ def main():
         pet.type_timer.stop()
         pet.is_typing = False
         pet._bubble_queue.clear()
+
+        # ---- 5. 发送新消息时不得闪现/续播上一轮回复 ----
+        pet.input_box.setPlainText("新消息")
+        pet.handle_api_reply("【normal】上一轮回复的内容", 60000)  # 极慢打字，模拟正在播放
+        assert pet.is_typing
+        pet.send_msg()
+        # 旧一轮立即终结：旧文本不进新气泡、队列清空、只播放占位符“...”
+        assert pet.full_text == "...", pet.full_text[:40]
+        assert "上一轮回复的内容" not in pet.chat_bubble.text()
+        assert not any("上一轮" in t for t, _ in pet._bubble_queue)
+        assert pet.chat_thread.sent, "新消息未发送到聊天线程"
+        pet.type_timer.stop()
+        pet.is_typing = False
+        pet._bubble_queue.clear()
+        pet.chat_bubble.hide()
 
         pet.close()
         pet.deleteLater()
