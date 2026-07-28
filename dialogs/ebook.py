@@ -97,6 +97,52 @@ def _format_size(size):
         value /= 1024
 
 
+def _force_delete_dir(path, attempts=3, delay=0.05):
+    """尽力删除目录。Windows 上若文件被占用，回退到 MoveFileEx
+    (MOVEFILE_DELAY_UNTIL_REBOOT)，由内核在下次启动时清理。"""
+    if not os.path.isdir(path):
+        return
+    for _ in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError:
+            time.sleep(delay)
+    # shutil.rmtree 彻底失败 → Windows 内核级兜底
+    if os.name == "nt":
+        try:
+            _schedule_reboot_delete(path)
+        except Exception:
+            pass
+
+
+def _schedule_reboot_delete(path):
+    """调用 Win32 MoveFileExW 将目录标记为'下次启动删除'。
+    此操作由 Windows Session Manager 写入 PendingFileRenameOperations
+    注册表键，在内核加载用户态进程之前执行，不受文件锁影响。
+    仅接受 EBOOK_DIR 子树内的路径，拒绝其他任何输入。"""
+    # 安全阀：绝对拒绝 EBOOK_DIR 之外的路径
+    ebook_root = os.path.abspath(EBOOK_DIR)
+    target = os.path.abspath(path)
+    if os.path.commonpath((ebook_root, target)) != ebook_root:
+        return
+    import ctypes
+    from ctypes import wintypes
+    MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.MoveFileExW.restype = wintypes.BOOL
+    kernel32.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    # 自底向上遍历：先删文件，再删子目录，最后删顶层
+    for root, dirs, files in os.walk(path, topdown=False):
+        for name in files:
+            filepath = os.path.join(root, name)
+            kernel32.MoveFileExW(filepath, None, MOVEFILE_DELAY_UNTIL_REBOOT)
+        for name in dirs:
+            dirpath = os.path.join(root, name)
+            kernel32.MoveFileExW(dirpath, None, MOVEFILE_DELAY_UNTIL_REBOOT)
+    kernel32.MoveFileExW(path, None, MOVEFILE_DELAY_UNTIL_REBOOT)
+
+
 def _cleanup_pending_ebook_deletions():
     """启动时清理上次未能删除的电子书副本目录。
 
@@ -149,13 +195,9 @@ def _cleanup_pending_ebook_deletions():
         if (os.path.commonpath((root, target)) != root
                 or not os.path.isdir(target)):
             continue
-        for _ in range(3):
-            try:
-                shutil.rmtree(target)
-                break
-            except Exception:
-                time.sleep(0.05)
-        else:
+        try:
+            _force_delete_dir(target)
+        except Exception:
             remaining.append({"folder": target, "original": source or target})
 
     # ---- 重写标记（仅当仍有残留时） ----
@@ -1938,10 +1980,7 @@ class EbookShelfDialog(QDialog):
                 root = os.path.abspath(EBOOK_DIR)
                 if (os.path.commonpath((root, dup_folder)) == root
                         and os.path.isdir(dup_folder)):
-                    try:
-                        shutil.rmtree(dup_folder)
-                    except OSError:
-                        pass
+                    _force_delete_dir(dup_folder)
         return changed
 
     @staticmethod
@@ -2292,50 +2331,20 @@ class EbookShelfDialog(QDialog):
             folder = os.path.abspath(os.path.join(EBOOK_DIR, str(book_id)))
             root = os.path.abspath(EBOOK_DIR)
             if os.path.commonpath((root, folder)) == root and os.path.isdir(folder):
-                for attempt in range(5):
-                    try:
-                        shutil.rmtree(folder)
-                        cleanup_error = None
-                        break
-                    except OSError as exc:
-                        cleanup_error = str(exc)
-                        if attempt < 4:
-                            time.sleep(0.1)
-                            QApplication.processEvents()
-                            gc.collect()
-                # 重试仍失败 → 重命名释放原始路径，再试一次
-                if cleanup_error:
+                _force_delete_dir(folder)
+                if os.path.isdir(folder):
+                    # 目录仍存在（非 Windows 或无 reboot delete 兜底）
+                    # → 重命名释放原始路径，再试 _force_delete_dir
                     temp_dir = folder + ".deleted." + str(int(time.time()))
-                    renamed = False
                     try:
                         os.rename(folder, temp_dir)
-                        renamed = True
-                        shutil.rmtree(temp_dir)
-                        cleanup_error = None
+                        _force_delete_dir(temp_dir)
+                        if not os.path.isdir(temp_dir):
+                            cleanup_error = None
                     except OSError as exc:
                         cleanup_error = str(exc)
-                    # 只要 rename 成功（原始路径已释放），无论 rmtree 是否成功，
-                    # 都把重命名后的目录写入待清理清单，下次启动兜底
-                    if renamed and cleanup_error:
-                        try:
-                            entries = []
-                            if os.path.isfile(_PENDING_CLEANUP_FILE):
-                                try:
-                                    with open(_PENDING_CLEANUP_FILE, "r", encoding="utf-8") as fh:
-                                        existing = json.load(fh)
-                                    entries = existing if isinstance(existing, list) else [existing]
-                                except Exception:
-                                    pass
-                            entries.append({"folder": temp_dir, "original": folder})
-                            os.makedirs(EBOOK_DIR, exist_ok=True)
-                            tmp_marker = _PENDING_CLEANUP_FILE + ".tmp"
-                            with open(tmp_marker, "w", encoding="utf-8") as fh:
-                                json.dump(entries, fh, ensure_ascii=False)
-                                fh.flush()
-                                os.fsync(fh.fileno())
-                            os.replace(tmp_marker, _PENDING_CLEANUP_FILE)
-                        except Exception:
-                            pass
+                else:
+                    cleanup_error = None
 
         # 4. 保存并刷新
         self._selected_book_id = None
@@ -2344,5 +2353,5 @@ class EbookShelfDialog(QDialog):
 
         if cleanup_error:
             self.pet.show_bubble(
-                f"【normal】书籍已从书架移除，但副本文件暂时无法删除（系统正在占用）。"
-                f"应用下次启动时会自动重试。错误：{cleanup_error}")
+                f"【normal】书籍已从书架移除。副本文件暂时被系统占用，"
+                f"已安排下次启动时自动清理。（{cleanup_error}）")
