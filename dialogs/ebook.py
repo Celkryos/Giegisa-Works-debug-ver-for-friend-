@@ -402,6 +402,14 @@ class EbookReaderDialog(QDialog):
         self._auto_controls = None
         self._auto_generation = 0
         self._closed_reported = False
+        # 无缝翻页（滚动连续阅读）状态：文档是 [base, end) 的连续文本窗口，
+        # 滚动到底/到顶时自动向后追加/向前补页，并按需整页裁剪保持有界。
+        self._seamless_base = 0
+        self._seamless_end = 0
+        self._seamless_base_index = 0
+        self._seamless_next_index = 0
+        self._seamless_max_pages = 12
+        self._seamless_adjusting = False
 
         self.setWindowTitle(f"◇ 静默阅读舱 ◇  {book.get('title', '')}")
         self.setMinimumSize(380, 480)
@@ -501,14 +509,14 @@ class EbookReaderDialog(QDialog):
         reading = QVBoxLayout()
         reading.setSpacing(2)
         header = QHBoxLayout()
-        shelf_btn = QToolButton()
-        shelf_btn.setText("☰")
-        shelf_btn.setToolTip("返回书架")
-        shelf_btn.clicked.connect(self.back_to_shelf)
+        self.shelf_btn = QToolButton()
+        self.shelf_btn.setText("☰")
+        self.shelf_btn.setToolTip("返回书架")
+        self.shelf_btn.clicked.connect(self.back_to_shelf)
         self.header_info = QLabel("")
         self.header_info.setStyleSheet("color:#6c8193;font-size:11px;font-weight:bold;")
         self.header_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header.addWidget(shelf_btn)
+        header.addWidget(self.shelf_btn)
         header.addWidget(self.header_info, stretch=1)
         reading.addLayout(header)
 
@@ -518,6 +526,7 @@ class EbookReaderDialog(QDialog):
         self.text.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.text.customContextMenuRequested.connect(self._reader_menu)
         self.text.image_double_clicked.connect(self._open_image_preview)
+        self.text.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.text.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         if self.text.viewport() is not None:
             self.text.viewport().setAttribute(
@@ -539,18 +548,18 @@ class EbookReaderDialog(QDialog):
         reading.addWidget(self.reading_surface, stretch=1)
 
         nav = QHBoxLayout()
-        prev_btn = QToolButton()
-        prev_btn.setText("◀")
-        prev_btn.clicked.connect(self.prev_page)
+        self.prev_btn = QToolButton()
+        self.prev_btn.setText("◀")
+        self.prev_btn.clicked.connect(self.prev_page)
         self.chapter_label = QLabel("")
         self.chapter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chapter_label.setStyleSheet("font-weight:bold;color:#647b8f;")
-        next_btn = QToolButton()
-        next_btn.setText("▶")
-        next_btn.clicked.connect(self.next_page)
-        nav.addWidget(prev_btn)
+        self.next_btn = QToolButton()
+        self.next_btn.setText("▶")
+        self.next_btn.clicked.connect(self.next_page)
+        nav.addWidget(self.prev_btn)
         nav.addWidget(self.chapter_label, stretch=1)
-        nav.addWidget(next_btn)
+        nav.addWidget(self.next_btn)
         reading.addLayout(nav)
 
         self.progress = QProgressBar()
@@ -570,6 +579,15 @@ class EbookReaderDialog(QDialog):
         self._make_marks_panel()
         self._make_auto_panel()
         self._make_other_panel()
+        self._sync_tool_button_colors()
+
+    def _sync_tool_button_colors(self):
+        """左侧工具列及翻页按钮的图标颜色：日间固定为黑色，不随操作系统
+        明暗主题变化；夜间模式由阅读器主题样式表统一接管（置空回退）。"""
+        night = bool(self.settings.get("night_mode", False))
+        qss = "" if night else "color:#1a1a1a;"
+        for button in self.tool_buttons + [self.shelf_btn, self.prev_btn, self.next_btn]:
+            button.setStyleSheet(qss)
 
     def _panel_scroll(self):
         content = QWidget()
@@ -671,6 +689,14 @@ class EbookReaderDialog(QDialog):
         layout.addWidget(self.bg_mode)
         layout.addWidget(QLabel("背景透明度"))
         layout.addWidget(self.opacity)
+        self.seamless_check = QCheckBox("无缝翻页（滚动连续阅读）")
+        self.seamless_check.setToolTip(
+            "开启后不再逐页翻页：往下滚动时后续页与章节自动接续，"
+            "向上滚动也可回看；关闭则恢复逐页模式。")
+        self.seamless_check.setChecked(bool(self.settings.get("seamless_reading", False)))
+        self.seamless_check.toggled.connect(
+            lambda checked: self._set_setting("seamless_reading", checked))
+        layout.addWidget(self.seamless_check)
         layout.addStretch()
 
     def _make_search_panel(self):
@@ -990,13 +1016,198 @@ class EbookReaderDialog(QDialog):
     def show_page(self):
         if not self.pages or not self.parsed:
             return
+        if self._seamless_enabled():
+            self._show_page_seamless()
+            return
         start, end, chapter = self.pages[self.current_page]
-        self.current_chapter = chapter
         self.text.clear()
         self.text.setPlainText(self.full_text[start:end])
         self._insert_inline_images(start, end)
         self._apply_visual_format()
         self._apply_annotations(start, end)
+        self._update_page_chrome()
+
+    # ==================== 无缝翻页（滚动连续阅读） ====================
+
+    def _seamless_enabled(self):
+        return bool(self.settings.get("seamless_reading", False))
+
+    def _show_page_seamless(self):
+        """无缝模式下的 show_page：目标已在连续文档内则只滚动+重贴批注，
+        恰好是末尾下一页则续接，否则以目标页为起点重建连续文档。"""
+        start, _, _ = self.pages[self.current_page]
+        contained = (self._seamless_end > self._seamless_base
+                     and self._seamless_base <= start < self._seamless_end)
+        if contained:
+            # 批注可能有增删（高亮/改色），格式全清后重贴
+            self._apply_visual_format()
+            self._apply_annotations(
+                self._seamless_base, self._seamless_end, self._seamless_base)
+            self._seamless_scroll_to(start)
+        elif (start == self._seamless_end and self._seamless_end > self._seamless_base
+                and self._seamless_append_one()):
+            self._seamless_trim_head_if_needed()
+            self._seamless_scroll_to(start)
+        else:
+            self._seamless_reset(self.current_page)
+        self._update_page_chrome()
+
+    def _seamless_reset(self, page_index):
+        """以指定页为起点重建连续文档（含一页预取）。"""
+        # 滚动事件重入护栏：clear/setPlainText 会改变滚动条并触发
+        # _on_scroll，若任其插足会造成文档与页状态错乱乃至崩溃。
+        prev_flag = self._seamless_adjusting
+        self._seamless_adjusting = True
+        try:
+            start, end, _ = self.pages[page_index]
+            self.text.clear()
+            self._seamless_base = start
+            self._seamless_end = end
+            self._seamless_base_index = page_index
+            self._seamless_next_index = page_index + 1
+            self.text.setPlainText(self.full_text[start:end])
+            self._insert_inline_images(start, end)
+            self._apply_visual_format()
+            self._apply_annotations(start, end)
+            self._seamless_append_one()  # 预取下一页
+            self._seamless_scroll_to(start)
+        finally:
+            self._seamless_adjusting = prev_flag
+
+    def _seamless_append_one(self):
+        """向文档末尾追加下一页（无缝模式的核心：往下滚自动接上）。"""
+        if self._seamless_next_index >= len(self.pages):
+            return False
+        start, end, _ = self.pages[self._seamless_next_index]
+        if start != self._seamless_end:
+            return False  # 页边界不连续（理论上不发生），放弃追加
+        prev_flag = self._seamless_adjusting
+        self._seamless_adjusting = True
+        try:
+            cursor = self.text.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(self.full_text[start:end])
+            self._seamless_end = end
+            self._seamless_next_index += 1
+            self._insert_inline_images(start, end, self._seamless_base)
+            self._apply_visual_format()
+            self._apply_annotations(start, end, self._seamless_base)
+        finally:
+            self._seamless_adjusting = prev_flag
+        return True
+
+    def _seamless_prepend_one(self):
+        """向文档顶部补回上一页（往上滚回看），并保持视口不跳。
+
+        实现用整段重建而非 insertText(0)——实测在 Qt 文本引擎中，
+        首部插入与后续 clear/setPlainText 组合会触发堆损坏
+        (0xc0000374)，而 setPlainText 整段替换是稳定路径。
+        """
+        if self._seamless_base_index <= 0:
+            return False
+        prev_flag = self._seamless_adjusting
+        self._seamless_adjusting = True
+        try:
+            top_cursor = self.text.cursorForPosition(QPoint(0, 0))
+            anchor_abs = self._seamless_base + top_cursor.position()
+            index = self._seamless_base_index - 1
+            new_base = self.pages[index][0]
+            self.text.setPlainText(self.full_text[new_base:self._seamless_end])
+            self._seamless_base = new_base
+            self._seamless_base_index = index
+            self._insert_inline_images(new_base, self._seamless_end, new_base)
+            self._apply_visual_format()
+            self._apply_annotations(new_base, self._seamless_end, new_base)
+            # 恢复视口锚点，避免重建导致画面跳动
+            self._seamless_scroll_to(anchor_abs)
+        finally:
+            self._seamless_adjusting = prev_flag
+        return True
+
+    def _seamless_trim_head_if_needed(self):
+        """从顶部整页裁剪过老的内容，保持文档规模有界；视口稳定。"""
+        prev_flag = self._seamless_adjusting
+        self._seamless_adjusting = True
+        try:
+            while self._seamless_next_index - self._seamless_base_index > self._seamless_max_pages:
+                top_cursor = self.text.cursorForPosition(QPoint(0, 0))
+                anchor_abs = self._seamless_base + top_cursor.position()
+                cut_end = self.pages[self._seamless_base_index + 1][0]
+                if cut_end > anchor_abs:
+                    break  # 不能裁掉用户正在看的内容
+                cut_len = cut_end - self._seamless_base
+                cursor = self.text.textCursor()
+                cursor.setPosition(0)
+                cursor.setPosition(cut_len, QTextCursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+                self._seamless_base = cut_end
+                self._seamless_base_index += 1
+                self._seamless_scroll_to(anchor_abs)
+        finally:
+            self._seamless_adjusting = prev_flag
+
+    def _seamless_trim_tail_if_needed(self):
+        """向上回看过多时，从末尾整页裁剪视口之下的内容。"""
+        prev_flag = self._seamless_adjusting
+        self._seamless_adjusting = True
+        try:
+            while self._seamless_next_index - self._seamless_base_index > self._seamless_max_pages:
+                bottom_cursor = self.text.cursorForPosition(
+                    QPoint(0, max(0, self.text.viewport().height() - 1)))
+                bottom_abs = self._seamless_base + bottom_cursor.position()
+                last_start = self.pages[self._seamless_next_index - 1][0]
+                if last_start < bottom_abs:
+                    break  # 末尾页正在视口内，不裁
+                cursor = self.text.textCursor()
+                cursor.setPosition(last_start - self._seamless_base)
+                cursor.setPosition(len(self.text.toPlainText()),
+                                   QTextCursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+                self._seamless_end = last_start
+                self._seamless_next_index -= 1
+        finally:
+            self._seamless_adjusting = prev_flag
+
+    def _seamless_scroll_to(self, absolute):
+        local = max(0, absolute - self._seamless_base)
+        cursor = self.text.textCursor()
+        cursor.setPosition(min(local, len(self.text.toPlainText())))
+        self.text.setTextCursor(cursor)
+        self.text.ensureCursorVisible()
+
+    def _on_scroll(self, value):
+        if not self._seamless_enabled() or not self.pages or self._seamless_adjusting:
+            return
+        self._seamless_adjusting = True
+        try:
+            bar = self.text.verticalScrollBar()
+            if bar.maximum() - value < 120:
+                # 接近底部：自动接上后续页，并按需裁掉过老页
+                self._seamless_append_one()
+                self._seamless_trim_head_if_needed()
+            elif value < 120 and self._seamless_base_index > 0:
+                # 接近顶部：补回前文，并按需裁掉过新页
+                self._seamless_prepend_one()
+                self._seamless_trim_tail_if_needed()
+            self._seamless_sync_position()
+        finally:
+            self._seamless_adjusting = False
+
+    def _seamless_sync_position(self):
+        """滚动时把视口顶部位置同步为当前页/进度/保存的阅读位置。"""
+        top_cursor = self.text.cursorForPosition(QPoint(0, 0))
+        absolute = self._seamless_base + top_cursor.position()
+        page = next(
+            (i for i, (s, e, _) in enumerate(self.pages) if s <= absolute < e),
+            len(self.pages) - 1)
+        if page != self.current_page:
+            self.current_page = page
+        self._update_page_chrome()
+
+    def _update_page_chrome(self):
+        """页眉信息、章节名、进度条与阅读位置保存（两种模式共用）。"""
+        start, end, chapter = self.pages[self.current_page]
+        self.current_chapter = chapter
         self.toc_list.setCurrentRow(chapter)
         chapter_title = self.parsed["chapters"][chapter]["title"]
         percent = (end / max(1, len(self.full_text))) * 100
@@ -1015,13 +1226,16 @@ class EbookReaderDialog(QDialog):
         self._last_page_end = max(self._last_page_end, end)
         self._update_status()
 
-    def _insert_inline_images(self, page_start, page_end):
+    def _insert_inline_images(self, page_start, page_end, base=None):
         # 倒序替换对象占位符，确保前面的文本位置不会被后续插入扰动。
+        # base：文档原点对应的绝对偏移。整页渲染时与 page_start 相同；
+        # 无缝模式下文档是多页拼接，需用 _seamless_base 换算本地坐标。
+        origin = page_start if base is None else base
         for absolute_pos, path in sorted(self.inline_images.items(), reverse=True):
             if not (page_start <= absolute_pos < page_end):
                 continue
             cursor = self.text.textCursor()
-            local = absolute_pos - page_start
+            local = absolute_pos - origin
             cursor.setPosition(local)
             cursor.setPosition(local + 1, QTextCursor.MoveMode.KeepAnchor)
             fmt = QTextImageFormat()
@@ -1114,14 +1328,16 @@ class EbookReaderDialog(QDialog):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         return out if canvas.save(out, "PNG") else ""
 
-    def _apply_annotations(self, page_start, page_end):
+    def _apply_annotations(self, page_start, page_end, base=None):
+        # base：文档原点对应的绝对偏移（无缝模式下为 _seamless_base）。
+        origin = page_start if base is None else base
         for mark in self.book.setdefault("annotations", []):
             begin, end = int(mark.get("start", 0)), int(mark.get("end", 0))
             if end <= page_start or begin >= page_end:
                 continue
             cursor = self.text.textCursor()
-            cursor.setPosition(max(0, begin - page_start))
-            cursor.setPosition(min(page_end, end) - page_start, QTextCursor.MoveMode.KeepAnchor)
+            cursor.setPosition(max(0, begin - origin))
+            cursor.setPosition(min(page_end, end) - origin, QTextCursor.MoveMode.KeepAnchor)
             fmt = QTextCharFormat()
             fmt.setBackground(QColor(mark.get("color", HIGHLIGHT_COLORS[0])))
             cursor.mergeCharFormat(fmt)
@@ -1178,7 +1394,10 @@ class EbookReaderDialog(QDialog):
                 else "day_profile")
             self.settings.setdefault(profile_name, {})[key] = value
         save_config(self.pet.config, force=False)
-        if repaginate:
+        if key == "seamless_reading":
+            # 切换阅读模式：按当前页以新模式重绘，无需重排或单刷格式
+            self.show_page()
+        elif repaginate:
             self.repaginate()
         else:
             self._apply_visual_format()
@@ -1249,6 +1468,10 @@ class EbookReaderDialog(QDialog):
         self.opacity.setValue(int(self.settings.get("background_opacity", 100)))
         self.opacity.blockSignals(False)
 
+        self.seamless_check.blockSignals(True)
+        self.seamless_check.setChecked(bool(self.settings.get("seamless_reading", False)))
+        self.seamless_check.blockSignals(False)
+
     def _apply_window_theme(self):
         night = bool(self.settings.get("night_mode", False))
         self.setProperty("ebookNightMode", night)
@@ -1293,6 +1516,7 @@ class EbookReaderDialog(QDialog):
             self.night_status.setText(
                 "当前：夜间配置（本模式内的修改会单独保存）"
                 if night else "当前：日间配置（本模式内的修改会单独保存）")
+        self._sync_tool_button_colors()
 
     def prev_page(self):
         if self.current_page > 0:
@@ -1347,18 +1571,31 @@ class EbookReaderDialog(QDialog):
             (i for i, page in enumerate(self.pages) if page[0] <= position < page[1]),
             len(self.pages) - 1)
         self.show_page()
-        local = max(0, position - self._page_start())
+        local = max(0, position - self._doc_base())
         cursor = self.text.textCursor()
         cursor.setPosition(min(local, len(self.text.toPlainText())))
         self.text.setTextCursor(cursor)
         self.text.ensureCursorVisible()
 
+    def _refresh_marks_view(self):
+        """批注增删改后刷新正文。无缝模式下须整页重绘——文本格式是
+        贴在字符上的，增量方式无法移除已删除/改色的旧高亮。"""
+        if self._seamless_enabled():
+            self._seamless_reset(self.current_page)
+        else:
+            self.show_page()
+
+    def _doc_base(self):
+        """正文文档原点对应的绝对偏移：无缝模式为连续文档起点，分页模式为当前页起点。"""
+        return self._seamless_base if self._seamless_enabled() else self._page_start()
+
     def _selection_range(self):
         cursor = self.text.textCursor()
         if not cursor.hasSelection():
             return None
-        start = self._page_start() + cursor.selectionStart()
-        end = self._page_start() + cursor.selectionEnd()
+        base = self._doc_base()
+        start = base + cursor.selectionStart()
+        end = base + cursor.selectionEnd()
         return start, end, cursor.selectedText()
 
     def highlight_selection(self):
@@ -1383,7 +1620,7 @@ class EbookReaderDialog(QDialog):
                 "id": new_id(), "type": "highlight", "start": start, "end": end,
                 "text": text[:160], "color": color, "note": "",
                 "created": datetime.now().isoformat(timespec="minutes")})
-        self.show_page()
+        self._refresh_marks_view()
         self._refresh_marks()
         save_config(self.pet.config)
 
@@ -1403,7 +1640,7 @@ class EbookReaderDialog(QDialog):
             "color": self.settings.get("highlight_color", HIGHLIGHT_COLORS[0]),
             "note": note.strip(),
             "created": datetime.now().isoformat(timespec="minutes")})
-        self.show_page()
+        self._refresh_marks_view()
         self._refresh_marks()
         save_config(self.pet.config)
 
@@ -1477,7 +1714,7 @@ class EbookReaderDialog(QDialog):
         key = "bookmarks" if kind == "bookmark" else "annotations"
         self.book[key] = [mark for mark in self.book.get(key, []) if mark.get("id") != mark_id]
         self._refresh_marks()
-        self.show_page()
+        self._refresh_marks_view()
         save_config(self.pet.config)
 
     def edit_mark(self):
@@ -1507,13 +1744,13 @@ class EbookReaderDialog(QDialog):
         if title.strip():
             mark["title"] = title.strip()
             self._refresh_marks()
-            self.show_page()
+            self._refresh_marks_view()
             save_config(self.pet.config)
 
     def _save_mark_note(self, mark, note):
         mark["note"] = note.strip()
         self._refresh_marks()
-        self.show_page()
+        self._refresh_marks_view()
         save_config(self.pet.config)
 
     def change_mark_color(self):
@@ -1538,7 +1775,7 @@ class EbookReaderDialog(QDialog):
             return
         mark["color"] = color.name()
         self._refresh_marks()
-        self.show_page()
+        self._refresh_marks_view()
         save_config(self.pet.config)
 
     def _reader_menu(self, pos):
@@ -1583,7 +1820,7 @@ class EbookReaderDialog(QDialog):
             mark for mark in self.book.get("annotations", [])
             if mark.get("id") not in target_ids]
         self._refresh_marks()
-        self.show_page()
+        self._refresh_marks_view()
         save_config(self.pet.config)
 
     def talk_about_selection(self):
@@ -1670,9 +1907,16 @@ class EbookReaderDialog(QDialog):
         self._last_page_end = max(self._last_page_end, self._auto_position)
         if self._auto_position >= self.pages[self.current_page][1] and self.current_page < len(self.pages) - 1:
             self.current_page += 1
-            self.show_page()
+            if self._seamless_enabled():
+                # 无缝模式：自动阅读翻页即向后续接，不重绘整页文档
+                self._seamless_append_one()
+                self._seamless_trim_head_if_needed()
+                self._update_page_chrome()
+                self._seamless_scroll_to(self.pages[self.current_page][0])
+            else:
+                self.show_page()
         cursor = self.text.textCursor()
-        local = max(0, self._auto_position - self._page_start())
+        local = max(0, self._auto_position - self._doc_base())
         cursor.setPosition(min(local, len(self.text.toPlainText())))
         cursor.setPosition(min(local + advance, len(self.text.toPlainText())), QTextCursor.MoveMode.KeepAnchor)
         fmt = QTextCharFormat()
